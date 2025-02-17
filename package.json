@@ -1,0 +1,51 @@
+{
+  "name": "@dwidge/file-cache-expo",
+  "version": "0.0.1",
+  "description": "A file cache and sync component.",
+  "repository": "github:dwidge/components-expo",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/cjs/index.js",
+      "import": "./dist/esm/index.js",
+      "types": "./dist/types/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "prepare": "rimraf dist && ncp assets/ dist/ && tsc -b . tsconfig.cjs.json tsconfig.test.json",
+    "test": "node --enable-source-maps --test --test-name-pattern"
+  },
+  "peerDependencies": {
+    "@dwidge/hooks-react": "^0.0.10",
+    "@dwidge/trace-js": "^0.0.10",
+    "@dwidge/crud-api-react": "^0.0.18",
+    "@dwidge/utils-js": "^0.0.14",
+    "assert": "^2.1.0",
+    "axios": "^1.7.7",
+    "expo-file-system": "^17.0.1",
+    "react": "^18.2.0",
+    "react-native": "^0.74.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/assert": "^1.5.10",
+    "@types/node": "^22.7.5",
+    "expect": "^29.7.0",
+    "ncp": "^2.0.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@9.12.1",
+  "engines": {
+    "node": ">=20"
+  }
+}
