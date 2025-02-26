@@ -465,15 +465,17 @@ export const FileCacheProvider = ({
     cachedFileIds,
   });
 
-  useEvictionCacheManager({
-    maxCache,
-    cachedFileIds,
-    pendingFileIds,
-    recentFileIds,
-    mountedFileIds,
-    setUri,
-  });
+  // todo: when full it loops over and over trying to evict
+  // useEvictionCacheManager({
+  //   maxCache,
+  //   cachedFileIds,
+  //   pendingFileIds,
+  //   recentFileIds,
+  //   mountedFileIds,
+  //   setUri,
+  // });
 
+  // todo: it may start fetching while sync is in progress, causing double fetch
   // useLiveCacheManager({
   //   isOnline,
   //   mountedFileIds,

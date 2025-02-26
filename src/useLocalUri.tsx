@@ -72,7 +72,7 @@ export const useManagedUriStorage = (
             return data;
           }
         : undefined,
-    [setUri],
+    [setUri, setItems],
   );
 
   // Calls the storage reset and clears local items.
