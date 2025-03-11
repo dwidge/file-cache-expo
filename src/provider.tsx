@@ -492,18 +492,24 @@ export const FileCacheProvider = ({
    * from pending storage and then uploaded remotely. Upon successful upload,
    * the file ID is removed from the pending list.
    */
-  const syncPendingFiles: (() => Promise<void>) | Disabled =
+  const syncPendingFiles: ((signal?: AbortSignal) => Promise<void>) | Disabled =
     pendingFileIds && setPendingFileIds && getUri && uploadFile
-      ? async (): Promise<void> => {
+      ? async (signal?: AbortSignal): Promise<void> => {
           log("Start upload pending list...", { count: pendingFileIds.length });
           for (const id of pendingFileIds) {
+            if (signal?.aborted) throw new Error("Upload aborted");
+
             try {
               const dataUri = await getUri(id);
+              if (signal?.aborted) throw new Error("Upload aborted");
+
               log(`Start upload pending file...`, {
                 id,
                 size: dataUri?.length ?? null,
               });
               await uploadFile(id, dataUri);
+              if (signal?.aborted) throw new Error("Upload aborted");
+
               log(`Finish upload pending file.`, {
                 id,
               });
@@ -511,6 +517,8 @@ export const FileCacheProvider = ({
                 prev.filter((pendingId) => pendingId !== id),
               );
             } catch (error) {
+              if (signal?.aborted) throw error;
+
               log(
                 `syncPendingFilesE1: Error upload pending file ${id}: ${error}`,
                 { cause: error },
@@ -529,9 +537,9 @@ export const FileCacheProvider = ({
    * pending files), evict the oldest cached file (that is not pending) before
    * adding a new one. If the cache has old ids not in the list, remove them from cache.
    */
-  const syncLatestFiles: (() => Promise<void>) | Disabled =
+  const syncLatestFiles: ((signal?: AbortSignal) => Promise<void>) | Disabled =
     getCacheableIds && cachedFileIds && setUri && downloadFile
-      ? async () => {
+      ? async (signal?: AbortSignal) => {
           assert(cachedFileIds);
           assert(pendingFileIds);
           assert(mountedFileIds);
@@ -547,6 +555,8 @@ export const FileCacheProvider = ({
 
           log("Start fetching...", { count: idsToFetch.length });
           for (const id of idsToFetch) {
+            if (signal?.aborted) throw new Error("Sync aborted");
+
             // Check if cache is full (reserve space for pending items)
             if (currentCachedIds.length >= maxCache) {
               log(`Try to make space...`);
@@ -576,8 +586,12 @@ export const FileCacheProvider = ({
               );
             }
             try {
+              if (signal?.aborted) throw new Error("Sync aborted");
+
               log(`Try to fetch file ${id}...`);
               const dataUri = await downloadFile(id);
+              if (signal?.aborted) throw new Error("Sync aborted");
+
               if (dataUri === null) {
                 log(`File ${id} is deleted. Not added to cache.`);
               } else {
@@ -586,6 +600,8 @@ export const FileCacheProvider = ({
                 log(`File ${id} fetched and cached.`);
               }
             } catch (error) {
+              if (signal?.aborted) throw error;
+
               log(
                 `syncLatestFilesE2: Error refreshing cache for file ${id}: ${error}`,
                 { cause: error },
@@ -620,6 +636,9 @@ export const FileCacheProvider = ({
             pull?: boolean;
           }) => {
             log("Sync started");
+            const signal = options?.signal;
+            if (signal?.aborted) throw new Error("Sync aborted");
+
             const totalTasks = 2;
             let completedTasks = 0;
             const reportProgress = () => {
@@ -629,10 +648,14 @@ export const FileCacheProvider = ({
               }
             };
 
-            await syncPendingFiles();
+            await syncPendingFiles(signal);
+            if (signal?.aborted) throw new Error("Sync aborted");
+
             completedTasks++;
             reportProgress();
-            if (options?.pull !== false) await syncLatestFiles();
+            if (options?.pull !== false) await syncLatestFiles(signal);
+            if (signal?.aborted) throw new Error("Sync aborted");
+
             completedTasks++;
             reportProgress();
             log("Sync finished");
