@@ -70,6 +70,7 @@ export type FileCache = {
   sync?: (options?: {
     signal?: AbortSignal;
     onProgress?: (progress: number) => void;
+    pull?: boolean;
   }) => Promise<void>;
   /**
    * Function to reset the file cache, deleting all cached files and clearing lists.
@@ -616,6 +617,7 @@ export const FileCacheProvider = ({
         ? async (options?: {
             signal?: AbortSignal;
             onProgress?: (progress: number) => void;
+            pull?: boolean;
           }) => {
             log("Sync started");
             const totalTasks = 2;
@@ -630,7 +632,7 @@ export const FileCacheProvider = ({
             await syncPendingFiles();
             completedTasks++;
             reportProgress();
-            await syncLatestFiles();
+            if (options?.pull !== false) await syncLatestFiles();
             completedTasks++;
             reportProgress();
             log("Sync finished");
