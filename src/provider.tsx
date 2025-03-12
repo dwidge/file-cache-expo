@@ -54,6 +54,7 @@ export type FileCache = {
    * Hook to retrieve a file’s data URI. It will cause missing file data to download to cache if isOnline is true.
    */
   useItem: (fileId?: FileId) => AsyncState<DataUri | null> | Disabled;
+  getItem: ((id: string) => Promise<DataUri | null>) | undefined;
   /**
    * Hook to get a list of file IDs in the cache.
    */
@@ -80,6 +81,7 @@ export type FileCache = {
 
 export const FileCacheContext = createContext<FileCache>({
   useItem: () => [null, undefined],
+  getItem: async () => null,
   useCacheList: () => [],
   usePendingList: () => [],
   sync: async () => {},
@@ -725,6 +727,8 @@ export const FileCacheProvider = ({
     return [dataUri, setItem];
   };
 
+  const getItem = cacheStorage?.getUri;
+
   async function addToPending(fileId: FileId) {
     assert(pendingFileIds);
     assert(setPendingFileIds);
@@ -769,13 +773,22 @@ export const FileCacheProvider = ({
   const value = useMemo(
     () => ({
       useItem,
+      getItem,
       useCacheList,
       usePendingList,
       useRecentList,
       sync,
       reset,
     }),
-    [useItem, useCacheList, usePendingList, useRecentList, sync, reset],
+    [
+      useItem,
+      getItem,
+      useCacheList,
+      usePendingList,
+      useRecentList,
+      sync,
+      reset,
+    ],
   );
 
   return (

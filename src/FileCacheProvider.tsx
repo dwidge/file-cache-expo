@@ -5,6 +5,7 @@ import { PropsWithChildren } from "react";
 import {
   FileCacheProvider,
   useDownloadFileId,
+  useFileCache,
   useFileUri,
   useUploadFileId,
 } from "./provider";
@@ -105,3 +106,5 @@ export const useFileCache2Uri = (
       : undefined;
   return [uri, setMetaUri];
 };
+
+export const useGetFileCache2Uri = () => useFileCache().getItem;
