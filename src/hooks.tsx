@@ -76,7 +76,7 @@ export const useLocalDataUri = (
  */
 export const useRemoteDataUri = (
   [file, setFile]: AsyncState<FileRecord | null, Partial<FileRecord> | null>,
-  [cache, setCache]: AsyncState<DataUri | null>,
+  [cache, setCache]: AsyncState<DataUri | null | undefined>,
   axiosInstance: AxiosInstance,
   getFileUrls?: GetFileUrls,
 ): AsyncState<DataUri | null> => {
@@ -180,7 +180,7 @@ export const useCacheFileUri = (
   [file, setFile]: AsyncState<FileRecord | null, Partial<FileRecord> | null>,
   axios: AxiosInstance,
   getFileUrls?: GetFileUrls,
-): AsyncState<DataUri | null> => {
+): AsyncState<DataUri | null | undefined> => {
   // Retrieve the locally cached URI
   const [localCache, setLocalCache] = useManagedUriItem(fileId, context) ?? [];
 

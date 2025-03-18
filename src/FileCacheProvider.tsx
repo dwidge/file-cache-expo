@@ -95,13 +95,17 @@ export const useFileCache2Uri = (
     setUri && setFiles
       ? async (uri) => {
           const resolvedUri = await getActionValue(uri, null);
-          const mb = await getMetaBufferFromDataUri(resolvedUri);
-          const meta = mb ? mb.meta : { size: null, mime: null, sha256: null };
-          // console.log("setMeta1", meta, resolvedUri?.length ?? null);
-          // Update meta data of the file
-          await setFiles([{ id: fileId, ...meta }]);
+          if (resolvedUri !== undefined) {
+            const mb = await getMetaBufferFromDataUri(resolvedUri);
+            const meta = mb
+              ? mb.meta
+              : { size: null, mime: null, sha256: null };
+            // console.log("setMeta1", meta, resolvedUri?.length ?? null);
+            // Update meta data of the file
+            await setFiles([{ id: fileId, ...meta }]);
+          }
           // Update the data cache
-          return setUri(resolvedUri);
+          return (await setUri(resolvedUri)) ?? null;
         }
       : undefined;
   return [uri, setMetaUri];

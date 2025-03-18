@@ -5,8 +5,11 @@ import { DataUri } from "./types";
  */
 
 export interface UriStorage {
-  getUri: (id: string) => Promise<DataUri | null>;
-  setUri: (id: string, uri: DataUri | null) => Promise<DataUri | null>;
+  getUri: (id: string) => Promise<DataUri | null | undefined>;
+  setUri: (
+    id: string,
+    uri: DataUri | null | undefined,
+  ) => Promise<DataUri | null | undefined>;
   deleteUri: (id: string) => Promise<null>;
   getIds: () => Promise<string[]>;
   reset: () => Promise<void>;

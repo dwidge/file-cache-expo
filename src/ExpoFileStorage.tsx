@@ -136,17 +136,17 @@ export class ExpoFileStorage implements UriStorage {
    *
    * @async
    * @param {string} id - The ID of the URI to retrieve.
-   * @returns {Promise<DataUri | null>} A promise that resolves to the Data URI string or `null` if not found or explicitly set to null.
+   * @returns {Promise<DataUri | null | undefined>} A promise that resolves to the Data URI string or `null` if explicitly set to null.
    * @throws {Error} If an unexpected file system error occurs during retrieval (excluding directory not found errors, which are handled and return `null`).
    */
-  getUri = async (id: string): Promise<DataUri | null> => {
+  getUri = async (id: string): Promise<DataUri | null | undefined> => {
     assertStorageAvailable("ExpoFileStorage", !!FileSystem.documentDirectory);
     const idFolderPath = this.getIdFolderPath(id);
 
     try {
       const folderInfo = await FileSystem.getInfoAsync(idFolderPath);
       if (!folderInfo.exists || !folderInfo.isDirectory) {
-        return null; // Subfolder for ID does not exist (not found)
+        return undefined; // Subfolder for ID does not exist (not found)
       }
 
       const folderContent = await readDirectorySafely(idFolderPath);
@@ -180,17 +180,24 @@ export class ExpoFileStorage implements UriStorage {
    *
    * @async
    * @param {string} id - The ID of the URI to set.
-   * @param {DataUri | null} uri - The Data URI string to store, or `null` to set a null URI.
-   * @returns {Promise<DataUri | null>} A promise that resolves to the Data URI that was set (or `null` if set to null).
+   * @param {DataUri | null | undefined} uri - The Data URI string to store, or `null` to set a null URI.
+   * @returns {Promise<DataUri | null | undefined>} A promise that resolves to the Data URI that was set (or `null` if set to null).
    * @throws {Error} If an unexpected file system error occurs during storage.
    */
-  setUri = async (id: string, uri: DataUri | null): Promise<DataUri | null> => {
+  setUri = async (
+    id: string,
+    uri: DataUri | null | undefined,
+  ): Promise<DataUri | null | undefined> => {
     assertStorageAvailable("ExpoFileStorage", !!FileSystem.documentDirectory);
     const idFolderPath = this.getIdFolderPath(id);
 
     try {
       // Delete existing subfolder if any before writing new one
       await deletePathIdempotently(idFolderPath);
+
+      // For undefined URI, the folder should not exist
+      if (uri === undefined) return undefined;
+
       // Ensure ID subfolder exists (or create it)
       await ensureDirectoryExists(idFolderPath);
 

@@ -21,7 +21,7 @@ export class IndexedDBStorage implements UriStorage {
     transactionMode: IDBTransactionMode,
     operation: (store: IDBObjectStore) => IDBRequest,
     handleUndefinedResult: boolean = false,
-  ): Promise<T | null> {
+  ): Promise<T | null | undefined> {
     assertStorageAvailable(
       "IndexedDBStorage",
       typeof indexedDB !== "undefined",
@@ -95,22 +95,34 @@ export class IndexedDBStorage implements UriStorage {
     });
   }
 
-  getUri = async (id: string): Promise<DataUri | null> => {
-    return this.runRequest<DataUri>("readonly", (store) => store.get(id), true);
+  getUri = async (id: string): Promise<DataUri | null | undefined> => {
+    return this.runRequest<DataUri>(
+      "readonly",
+      (store) => store.get(id),
+      false,
+    );
   };
 
-  setUri = async (id: string, uri: DataUri | null): Promise<DataUri | null> => {
+  setUri = async (
+    id: string,
+    uri: DataUri | null | undefined,
+  ): Promise<DataUri | null | undefined> => {
     if (uri === null) {
       // Store null directly in IndexedDB for null URI
       return this.runRequest<DataUri>("readwrite", (store) =>
         store.put(null, id),
       ).then(() => null);
+    } else if (uri === undefined) {
+      return this.deleteUri(id).then(() => null);
     }
     return this.runRequest<DataUri>("readwrite", (store) => store.put(uri, id));
   };
 
   deleteUri = async (id: string): Promise<null> => {
-    return this.runRequest<null>("readwrite", (store) => store.delete(id));
+    return (
+      (await this.runRequest<null>("readwrite", (store) => store.delete(id))) ??
+      null
+    );
   };
 
   getIds = async (): Promise<string[]> => {

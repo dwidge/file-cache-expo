@@ -6,6 +6,7 @@ import {
   useRecordItem,
   useRecordKeys,
 } from "@dwidge/hooks-react";
+import { dropUndefined } from "@dwidge/utils-js";
 import { useEffect, useMemo, useState } from "react";
 import { DataUri, Disabled } from "./types.js";
 import { UriStorage } from "./UriStorage.js";
@@ -19,12 +20,19 @@ export interface ManagedUriStorage {
   /** The list of IDs that have data stored. */
   ids?: string[];
   /** Retrieves the DataUri for the given id. */
-  getUri?: (id: string) => Promise<DataUri | null>;
+  getUri?: (id: string) => Promise<DataUri | null | undefined>;
   /**
    * Sets the DataUri for the given id.
-   * Passing null will delete the URI and remove the id.
+   * Passing null will delete the URI data and mark the id as null.
    */
-  setUri?: (id: string, data: DataUri | null) => Promise<DataUri | null>;
+  setUri?: (
+    id: string,
+    data: DataUri | null | undefined,
+  ) => Promise<DataUri | null | undefined>;
+  /**
+   * Clears cache for the given id. Does not mark the id as null.
+   */
+  deleteUri?: (id: string) => Promise<null>;
   /**
    * Resets the storage, deleting all URIs and clearing the ID list.
    */
@@ -62,11 +70,32 @@ export const useManagedUriStorage = (
   }, [getIds]);
 
   // Updates the items state as needed.
+  const myDeleteUri = useMemo(
+    () =>
+      deleteUri
+        ? async (id: string) => {
+            await deleteUri(id);
+            setItems(
+              (prev) =>
+                dropUndefined({ ...prev, [id]: undefined }) as Record<
+                  string,
+                  {}
+                >,
+            );
+            return null;
+          }
+        : undefined,
+    [deleteUri, setItems],
+  );
+
+  // Updates the items state as needed.
   const mySetUri = useMemo(
     () =>
-      setUri
-        ? async (id: string, data: DataUri | null) => {
+      setUri && myDeleteUri
+        ? async (id: string, data: DataUri | null | undefined) => {
             // console.log("mySetUri1", id, data?.length ?? null);
+            if (data === undefined) return myDeleteUri(id);
+
             await setUri(id, data);
             setItems((prev) => ({ ...prev, [id]: {} }));
             return data;
@@ -95,9 +124,10 @@ export const useManagedUriStorage = (
       items,
       getUri,
       setUri: mySetUri,
+      deleteUri: myDeleteUri,
       reset: myReset,
     }),
-    [ids, items, mySetUri, myReset],
+    [ids, items, mySetUri, myReset, myDeleteUri],
   );
 };
 
@@ -121,10 +151,12 @@ export const useManagedUriStorage = (
 export const useManagedUriItem = (
   id: string | Disabled,
   context: ManagedUriStorage | Disabled,
-): AsyncState<DataUri | null> | Disabled => {
+): AsyncState<DataUri | null | undefined> | Disabled => {
   const { getUri, setUri, items } = context ?? {};
 
-  const [value, setValue] = useAsyncState<DataUri | null>(undefined);
+  const [value, setValue] = useAsyncState<DataUri | null | undefined>(
+    undefined,
+  );
 
   // Tracks changes in items for the current id.
   const [item, setItem] = useRecordItem([items, undefined], id);
@@ -132,17 +164,18 @@ export const useManagedUriItem = (
   // On mount or when id or item changes, fetch the current URI.
   useEffect(() => {
     if (id && getUri && setValue) {
-      getUri(id).then(setValue);
+      getUri(id).then((v) => setValue(v ?? undefined));
     }
   }, [id, getUri, setValue, item]);
 
-  const mySetter: AsyncDispatch<DataUri | null> | undefined = useMemo(
-    () =>
-      id && setUri && setValue
-        ? async (uri) => setUri(id, await getActionValue(uri, value ?? null))
-        : undefined,
-    [id, setUri, value, setValue],
-  );
+  const mySetter: AsyncDispatch<DataUri | null | undefined> | undefined =
+    useMemo(
+      () =>
+        id && setUri && setValue
+          ? async (uri) => setUri(id, await getActionValue(uri, value ?? null))
+          : undefined,
+      [id, setUri, value, setValue],
+    );
 
   return [value, mySetter];
 };

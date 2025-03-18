@@ -23,6 +23,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
 } from "react";
 import { z } from "zod";
 import {
@@ -53,8 +54,10 @@ export type FileCache = {
   /**
    * Hook to retrieve a file’s data URI. It will cause missing file data to download to cache if isOnline is true.
    */
-  useItem: (fileId?: FileId) => AsyncState<DataUri | null> | Disabled;
-  getItem: ((id: string) => Promise<DataUri | null>) | undefined;
+  useItem: (
+    fileId?: FileId,
+  ) => AsyncState<DataUri | null | undefined> | Disabled;
+  getItem: ((id: string) => Promise<DataUri | null | undefined>) | undefined;
   /**
    * Hook to get a list of file IDs in the cache.
    */
@@ -77,6 +80,11 @@ export type FileCache = {
    * Function to reset the file cache, deleting all cached files and clearing lists.
    */
   reset?: () => Promise<void>;
+  /**
+   * Function to trigger a refresh of non-pending cached files.
+   * This will clear the cached data for non-pending files, triggering a refetch when they are next requested.
+   */
+  refreshNonPending?: (ids?: string[]) => Promise<void>;
 };
 
 export const FileCacheContext = createContext<FileCache>({
@@ -86,6 +94,7 @@ export const FileCacheContext = createContext<FileCache>({
   usePendingList: () => [],
   sync: async () => {},
   reset: async () => {},
+  refreshNonPending: async () => {}, // Added refreshNonPending to context
 });
 
 /**
@@ -117,7 +126,7 @@ export type FileCacheProviderProps = {
    * Function to download a file.
    * Receives the file id and should return the file’s DataUri (or null if it does not exist).
    */
-  downloadFile?: (id: FileId) => Promise<DataUri | Deleted>;
+  downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
 
   cacheStorage?: ManagedUriStorage;
   pendingIds?: AsyncState<FileId[]>;
@@ -247,9 +256,9 @@ export const useUploadFileId = (
 export const useDownloadFileId = (
   getUrls?: GetFileUrls,
   axios?: AxiosInstance,
-): ((id: FileId) => Promise<DataUri | null>) | Disabled =>
+): ((id: FileId) => Promise<DataUri | null | undefined>) | Disabled =>
   getUrls
-    ? async (id: FileId): Promise<DataUri | null> => {
+    ? async (id: FileId): Promise<DataUri | null | undefined> => {
         const record: Partial<FileRecord> | null = await getUrls({ id });
         if (!record) return null; // File record is null
 
@@ -271,7 +280,7 @@ export const useDownloadFileId = (
 
         if (!record.getUrl) {
           log(`No download URL available for file ${id}`);
-          return null;
+          return undefined;
         }
 
         const meta: FileMeta = {
@@ -284,7 +293,7 @@ export const useDownloadFileId = (
           meta,
           axios,
         });
-        return bufferBin ? getDataUriFromBufferBin(bufferBin) : null;
+        return bufferBin ? getDataUriFromBufferBin(bufferBin) : undefined;
       }
     : undefined;
 
@@ -389,7 +398,7 @@ const useLiveCacheManager = ({
   isOnline: boolean;
   mountedFileIds: FileId[];
   cachedFileIds: FileId[] | Loading;
-  downloadFile: (id: FileId) => Promise<DataUri | Deleted>;
+  downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
   setUri: ManagedUriStorage["setUri"] | Disabled;
 }) => {
   useEffect(() => {
@@ -425,6 +434,49 @@ const useLiveCacheManager = ({
 };
 
 /**
+ * Hook to trigger refresh of non-pending files.
+ */
+const useClearNonPendingFiles = ({
+  cachedFileIds,
+  pendingFileIds,
+  deleteUri,
+}: {
+  cachedFileIds: FileId[] | Loading;
+  pendingFileIds: FileId[] | Loading;
+  deleteUri: ManagedUriStorage["deleteUri"] | Disabled;
+}): ((ids?: string[]) => Promise<void>) | undefined =>
+  useMemo(
+    () =>
+      typeof cachedFileIds !== "object" ||
+      typeof pendingFileIds !== "object" ||
+      !deleteUri
+        ? undefined
+        : async (ids: string[] = cachedFileIds) => {
+            const nonPendingCachedIds = ids.filter(
+              (id) => !pendingFileIds.includes(id),
+            );
+
+            log("Start clearing non-pending files...", {
+              count: nonPendingCachedIds.length,
+            });
+
+            for (const id of nonPendingCachedIds) {
+              try {
+                await deleteUri(id); // Clear the cache for non-pending files
+                log(`Cleared cache for non-pending file ${id}`);
+              } catch (error) {
+                console.error(
+                  `Error clearing cache for non-pending file ${id}:`,
+                  error,
+                );
+              }
+            }
+            log("Finished clearing non-pending files.");
+          },
+    [cachedFileIds, pendingFileIds, deleteUri],
+  );
+
+/**
  * The provider uses 4 lists:
  *
  * - cached: ids of file binary data cached on disk/in memory
@@ -458,6 +510,7 @@ export const FileCacheProvider = ({
     ids: cachedFileIds,
     getUri,
     setUri,
+    deleteUri,
     reset: resetStorage,
   } = cacheStorage ?? {};
 
@@ -487,6 +540,12 @@ export const FileCacheProvider = ({
   //   setUri,
   // });
 
+  const refreshNonPending = useClearNonPendingFiles({
+    cachedFileIds,
+    pendingFileIds,
+    deleteUri,
+  });
+
   /**
    * Synchronize pending files by uploading each one.
    *
@@ -504,6 +563,9 @@ export const FileCacheProvider = ({
             try {
               const dataUri = await getUri(id);
               if (signal?.aborted) throw new Error("Upload aborted");
+
+              if (dataUri === undefined)
+                throw new Error(`Pending file not found`);
 
               log(`Start upload pending file...`, {
                 id,
@@ -700,8 +762,10 @@ export const FileCacheProvider = ({
    * @param fileId - The file identifier.
    * @returns The async state tuple of the file’s DataUri.
    */
-  const useItem = (fileId?: FileId): AsyncState<DataUri | null> | Disabled => {
-    const [dataUri, setDataUri]: AsyncState<DataUri | null> =
+  const useItem = (
+    fileId?: FileId,
+  ): AsyncState<DataUri | null | undefined> | Disabled => {
+    const [dataUri, setDataUri]: AsyncState<DataUri | null | undefined> =
       useManagedUriItem(fileId, cacheStorage) ?? [];
 
     // Register the fileId with the mount tracker.
@@ -709,21 +773,22 @@ export const FileCacheProvider = ({
     useMountTrackerItem(mountTracker, fileId);
 
     // Create a wrapped setter that adds the fileId to the pending list if updated.
-    const setItem: AsyncDispatch<DataUri | null> | undefined = useMemo(
-      () =>
-        fileId !== undefined &&
-        setDataUri &&
-        pendingFileIds &&
-        setPendingFileIds
-          ? async (data) => {
-              // Add the fileId to pending uploads.
-              await addToPending(fileId);
-              // Update the actual cached DataUri.
-              return setDataUri(data);
-            }
-          : undefined,
-      [fileId, setDataUri, pendingFileIds, setPendingFileIds, maxPending],
-    );
+    const setItem: AsyncDispatch<DataUri | null | undefined> | undefined =
+      useMemo(
+        () =>
+          fileId !== undefined &&
+          setDataUri &&
+          pendingFileIds &&
+          setPendingFileIds
+            ? async (data) => {
+                // Add the fileId to pending uploads.
+                await addToPending(fileId);
+                // Update the actual cached DataUri.
+                return setDataUri(data);
+              }
+            : undefined,
+        [fileId, setDataUri, pendingFileIds, setPendingFileIds, maxPending],
+      );
     return [dataUri, setItem];
   };
 
@@ -779,6 +844,7 @@ export const FileCacheProvider = ({
       useRecentList,
       sync,
       reset,
+      refreshNonPending,
     }),
     [
       useItem,
@@ -788,6 +854,7 @@ export const FileCacheProvider = ({
       useRecentList,
       sync,
       reset,
+      refreshNonPending,
     ],
   );
 
@@ -819,7 +886,7 @@ export const useFileCache = (): FileCache => {
  */
 export const useFileUri = (
   fileId?: FileId,
-): AsyncState<DataUri | null> | Disabled => {
+): AsyncState<DataUri | null | undefined> | Disabled => {
   const { useItem } = useFileCache();
   return useItem(fileId);
 };
@@ -850,6 +917,16 @@ export const useFileCacheSync = () => {
 export const useFileCacheReset = () => {
   const { reset } = useFileCache();
   return reset;
+};
+
+/**
+ * Hook to trigger file cache refresh of non-pending files.
+ *
+ * @returns The refreshNonPending function.
+ */
+export const useFileCacheClear = () => {
+  const { refreshNonPending } = useFileCache();
+  return refreshNonPending;
 };
 
 /**
