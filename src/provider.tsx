@@ -44,8 +44,8 @@ import { getDataUriFromBufferBin, getMetaBufferFromDataUri } from "./uri.js";
 import { ManagedUriStorage, useManagedUriItem } from "./useLocalUri.js";
 import { useMountTracker, useMountTrackerItem } from "./useMountTracker.js";
 
-const log = (...args) => {};
-// const log = (...args) => console.log(...args);
+// const log = (...args) => {};
+const log = (...args) => console.log(...args);
 
 /**
  * The API exposed by the File Cache system.
@@ -164,7 +164,7 @@ const evictCacheItem = async (
   // For simplicity, evict the last/oldest candidate.
   const evictId = candidates[candidates.length - 1];
   assert(evictId);
-  await setUri(evictId, null);
+  await setUri(evictId, undefined);
   log(`Evicted cache item: ${evictId}`);
   return evictId;
 };
@@ -260,7 +260,7 @@ export const useDownloadFileId = (
   getUrls
     ? async (id: FileId): Promise<DataUri | null | undefined> => {
         const record: Partial<FileRecord> | null = await getUrls({ id });
-        if (!record) return null; // File record is null
+        if (!record) return undefined; // File record is null
 
         // Here we assume that the remote metadata (size, mime, sha256) is available.
         // In practice you might need to call an API to get complete file meta.
@@ -392,45 +392,74 @@ const useLiveCacheManager = ({
   isOnline,
   mountedFileIds,
   cachedFileIds,
+  pendingFileIds,
   downloadFile,
   setUri,
 }: {
   isOnline: boolean;
   mountedFileIds: FileId[];
   cachedFileIds: FileId[] | Loading;
+  pendingFileIds: FileId[] | Loading;
   downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
   setUri: ManagedUriStorage["setUri"] | Disabled;
 }) => {
+  // Use a ref to prevent overlapping fetch calls.
+  const isFetchingRef = useRef(false);
+
+  // Prevent fetching a;ready cached or upload pending files
+  const fetchIds = useMemo(
+    () =>
+      cachedFileIds && pendingFileIds
+        ? mountedFileIds.filter(
+            (id) =>
+              !cachedFileIds?.includes(id) && !pendingFileIds?.includes(id),
+          )
+        : undefined,
+    [mountedFileIds, cachedFileIds, pendingFileIds],
+  );
+
   useEffect(() => {
-    if (!isOnline || typeof cachedFileIds !== "object" || !setUri) {
-      return; // Only run when online, cache loaded and storage available
+    if (!Array.isArray(fetchIds) || !setUri || !downloadFile) {
+      return;
     }
 
     const runLiveCache = async () => {
-      if (!isOnline) return;
-      const currentCachedIds = new Set(cachedFileIds); // For faster lookups
+      // If a fetch is already in progress, do not start another.
+      if (isFetchingRef.current) return;
+      isFetchingRef.current = true;
 
-      for (const id of mountedFileIds) {
-        if (!currentCachedIds.has(id)) {
-          log(`Live cache: Fetching mounted file ${id}...`);
-          try {
-            const dataUri = await downloadFile(id);
+      // Only fetch files that are mounted but not in cache.
+      for (const id of fetchIds) {
+        log(`Cache1: Fetching mounted file ${id}...`);
+        try {
+          const dataUri = await downloadFile(id);
+          if (dataUri == undefined) {
+            log(`Cache2: No data on server for mounted file ${id}`, {
+              fetchIds,
+              mountedFileIds,
+              cachedFileIds,
+              pendingFileIds,
+            });
+          } else {
             await setUri(id, dataUri);
-            if (dataUri)
-              log(`Live cache: Fetched and cached mounted file ${id}`);
-            else log(`Live cache: No data on server for mounted file ${id}`);
-          } catch (error) {
-            console.error(
-              `Live cache: Error fetching mounted file ${id}:`,
-              error,
-            );
+            log(`Cache3: Fetched and cached mounted file ${id}`, {
+              fetchIds,
+              mountedFileIds,
+              cachedFileIds,
+              pendingFileIds,
+            });
           }
+        } catch (error) {
+          log(`Cache4: Error fetching mounted file ${id}:`, error);
         }
       }
+
+      // Allow future fetches.
+      isFetchingRef.current = false;
     };
 
     runLiveCache();
-  }, [isOnline, mountedFileIds, cachedFileIds, downloadFile, setUri]);
+  }, [isOnline, fetchIds, downloadFile, setUri]);
 };
 
 /**
@@ -532,13 +561,15 @@ export const FileCacheProvider = ({
   // });
 
   // todo: it may start fetching while sync is in progress, causing double fetch
-  // useLiveCacheManager({
-  //   isOnline,
-  //   mountedFileIds,
-  //   cachedFileIds,
-  //   downloadFile,
-  //   setUri,
-  // });
+  // also it may cause an infinite render loop in react somehow
+  useLiveCacheManager({
+    isOnline,
+    mountedFileIds,
+    cachedFileIds,
+    pendingFileIds,
+    downloadFile,
+    setUri,
+  });
 
   const refreshNonPending = useClearNonPendingFiles({
     cachedFileIds,
@@ -564,8 +595,14 @@ export const FileCacheProvider = ({
               const dataUri = await getUri(id);
               if (signal?.aborted) throw new Error("Upload aborted");
 
-              if (dataUri === undefined)
-                throw new Error(`Pending file not found`);
+              if (dataUri == undefined) {
+                setPendingFileIds((prev) =>
+                  prev.filter((pendingId) => pendingId !== id),
+                );
+                throw new Error(
+                  `Pending file not found. Removed from pending list.`,
+                );
+              }
 
               log(`Start upload pending file...`, {
                 id,
