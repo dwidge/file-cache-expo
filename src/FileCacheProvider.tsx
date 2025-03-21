@@ -38,7 +38,7 @@ const useGetCacheableIds = (getFiles?: ApiGetList<FileRecord>) =>
         const files = await getFiles(
           { size: { $not: null } },
           {
-            columns: ["id"],
+            columns: ["id", "updatedAt"],
             order: [["updatedAt", "DESC"]],
             limit: maxItemsToCache,
           },
@@ -51,7 +51,9 @@ export const FileCacheProvider2 = ({
   children,
   maxCache,
   maxRecent,
+  maxUploadCache,
   cachePath,
+  uploadCachePath,
   isOnline,
   axios,
   getFilesLocal,
@@ -60,25 +62,33 @@ export const FileCacheProvider2 = ({
 }: PropsWithChildren<{
   maxCache: number;
   maxRecent: number;
+  maxUploadCache?: number;
   cachePath?: string;
+  uploadCachePath?: string;
   isOnline: boolean;
   axios?: AxiosInstance;
   getFilesLocal?: ApiGetList<FileRecord>;
   getFiles?: ApiGetList<FileRecord>;
   setFiles?: ApiSetList<FileRecord, { id: string }>;
-}>) => (
-  <FileCacheProvider
-    maxCache={maxCache}
-    maxRecent={maxRecent}
-    isOnline={isOnline}
-    getCacheableIds={useGetCacheableIds(getFilesLocal)}
-    uploadFile={useUploadFileId(useGetUrls(getFiles), axios)}
-    downloadFile={useDownloadFileId(useGetUrls(getFiles), axios)}
-    cacheStorage={useManagedUriStorage(usePlatformLocalStorage(cachePath))}
-  >
-    {children}
-  </FileCacheProvider>
-);
+}>) => {
+  return (
+    <FileCacheProvider
+      maxCache={maxCache}
+      maxUploadCache={maxUploadCache}
+      maxRecent={maxRecent}
+      isOnline={isOnline}
+      getCacheableIds={useGetCacheableIds(getFilesLocal)}
+      uploadFile={useUploadFileId(useGetUrls(getFiles), axios)}
+      downloadFile={useDownloadFileId(useGetUrls(getFiles), axios)}
+      cacheStorage={useManagedUriStorage(usePlatformLocalStorage(cachePath))}
+      uploadStorage={useManagedUriStorage(
+        usePlatformLocalStorage(uploadCachePath),
+      )}
+    >
+      {children}
+    </FileCacheProvider>
+  );
+};
 
 /**
  * Hook to access a file’s DataUri.

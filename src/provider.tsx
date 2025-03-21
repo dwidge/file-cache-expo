@@ -104,8 +104,8 @@ export type FileCacheProviderProps = {
   children: ReactNode;
   /** Maximum number of items in total to store in cache. */
   maxCache: number;
-  /** Maximum number of pending items to store in cache. */
-  maxPending?: number;
+  /** Maximum number of pending items to store in upload cache. */
+  maxUploadCache?: number;
   /** Maximum number of mounted items to fetch automatically when online. */
   maxMounted?: number;
   /** Maximum number of recent items to store in cache. */
@@ -129,7 +129,7 @@ export type FileCacheProviderProps = {
   downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
 
   cacheStorage?: ManagedUriStorage;
-  pendingIds?: AsyncState<FileId[]>;
+  uploadStorage?: ManagedUriStorage;
 };
 
 /* ──────────────────────────────────────────────────────────────────────────── *
@@ -140,7 +140,6 @@ export type FileCacheProviderProps = {
  * Evict the oldest cached file (that is not pending, recent or mounted) to free cache space.
  *
  * @param cachedIds - Array of currently cached file IDs.
- * @param pendingIds - Array of pending file IDs.
  * @param mountedIds - Array of mounted file IDs.
  * @param recentIds - Array of recent file IDs.
  * @param setUri - Function to set URI in storage.
@@ -148,17 +147,13 @@ export type FileCacheProviderProps = {
  */
 const evictCacheItem = async (
   cachedIds: FileId[],
-  pendingIds: FileId[],
   mountedIds: FileId[],
   recentIds: FileId[],
   setUri: ManagedUriStorage["setUri"],
 ): Promise<FileId | null> => {
   assert(setUri);
   const candidates = cachedIds.filter(
-    (id) =>
-      !pendingIds.includes(id) &&
-      !mountedIds.includes(id) &&
-      !recentIds.includes(id),
+    (id) => !mountedIds.includes(id) && !recentIds.includes(id),
   );
   if (candidates.length === 0) return null;
   // For simplicity, evict the last/oldest candidate.
@@ -204,7 +199,7 @@ export const useUploadFileId = (
   axios?: AxiosInstance,
 ): ((id: FileId, data: DataUri | Deleted) => Promise<void>) | Disabled =>
   getUrls && axios
-    ? async (id: FileId, data: DataUri | null): Promise<void> => {
+    ? async (id: FileId, data: DataUri | Deleted): Promise<void> => {
         log(`useUploadFileId1`, id, data?.length);
         if (data === null) {
           // If the file is to be deleted, you could call a remote deletion API here.
@@ -321,23 +316,20 @@ const useGetUrlsMock =
  */
 const useEvictionCacheManager = ({
   maxCache,
-  cachedFileIds,
-  pendingFileIds,
+  cacheFileIds,
   recentFileIds,
   mountedFileIds,
   setUri,
 }: {
   maxCache: number;
-  cachedFileIds: FileId[] | Loading;
-  pendingFileIds: FileId[] | Loading;
+  cacheFileIds: FileId[] | Loading;
   recentFileIds: FileId[] | Loading;
   mountedFileIds: FileId[];
   setUri: ManagedUriStorage["setUri"] | Disabled;
 }) => {
   useEffect(() => {
     if (
-      typeof cachedFileIds !== "object" ||
-      typeof pendingFileIds !== "object" ||
+      typeof cacheFileIds !== "object" ||
       typeof recentFileIds !== "object" ||
       !setUri
     ) {
@@ -345,23 +337,24 @@ const useEvictionCacheManager = ({
     }
 
     const runEviction = async () => {
-      let currentCachedIds = [...cachedFileIds];
+      if (cacheFileIds.length <= maxCache) return;
+
+      let currentCachedIds = [...cacheFileIds];
 
       while (currentCachedIds.length > maxCache) {
         const evictedId = await evictCacheItem(
           currentCachedIds,
-          pendingFileIds,
-          recentFileIds,
           mountedFileIds,
+          recentFileIds,
           setUri,
         );
         if (!evictedId) {
           log(
-            "Cache eviction failed to make space, stopping. Possibly too many mounted or pending files.",
+            "Cache eviction failed to make space, stopping. Possibly too many mounted or recent files.",
             {
               mounted: mountedFileIds.length,
-              pending: pendingFileIds.length,
-              cached: cachedFileIds.length,
+              recent: recentFileIds.length,
+              cached: cacheFileIds.length,
               maxCache,
             },
           );
@@ -374,14 +367,7 @@ const useEvictionCacheManager = ({
     };
 
     runEviction();
-  }, [
-    maxCache,
-    cachedFileIds,
-    pendingFileIds,
-    recentFileIds,
-    mountedFileIds,
-    setUri,
-  ]);
+  }, [maxCache, cacheFileIds, recentFileIds, mountedFileIds, setUri]);
 };
 
 /**
@@ -391,37 +377,46 @@ const useEvictionCacheManager = ({
 const useLiveCacheManager = ({
   isOnline,
   mountedFileIds,
-  cachedFileIds,
-  pendingFileIds,
+  cacheFileIds,
+  uploadFileIds,
   downloadFile,
   setUri,
+  maxMounted,
 }: {
   isOnline: boolean;
   mountedFileIds: FileId[];
-  cachedFileIds: FileId[] | Loading;
-  pendingFileIds: FileId[] | Loading;
+  cacheFileIds: FileId[] | Loading;
+  uploadFileIds: FileId[] | Loading;
   downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
   setUri: ManagedUriStorage["setUri"] | Disabled;
+  maxMounted?: number;
 }) => {
   // Use a ref to prevent overlapping fetch calls.
   const isFetchingRef = useRef(false);
 
-  // Prevent fetching a;ready cached or upload pending files
+  // Prevent fetching already cached or upload pending files and limit to maxMounted
   const fetchIds = useMemo(
     () =>
-      cachedFileIds && pendingFileIds
-        ? mountedFileIds.filter(
-            (id) =>
-              !cachedFileIds?.includes(id) && !pendingFileIds?.includes(id),
-          )
+      cacheFileIds && uploadFileIds
+        ? maxMounted !== undefined
+          ? mountedFileIds.slice(0, maxMounted)
+          : mountedFileIds.filter(
+              (id) =>
+                !cacheFileIds?.includes(id) && !uploadFileIds?.includes(id),
+            )
         : undefined,
-    [mountedFileIds, cachedFileIds, pendingFileIds],
+    [mountedFileIds, maxMounted, cacheFileIds, uploadFileIds],
   );
 
   useEffect(() => {
-    if (!Array.isArray(fetchIds) || !setUri || !downloadFile) {
+    if (
+      !isOnline ||
+      !Array.isArray(fetchIds) ||
+      !setUri ||
+      !downloadFile ||
+      fetchIds.length === 0
+    )
       return;
-    }
 
     const runLiveCache = async () => {
       // If a fetch is already in progress, do not start another.
@@ -437,16 +432,16 @@ const useLiveCacheManager = ({
             log(`Cache2: No data on server for mounted file ${id}`, {
               fetchIds,
               mountedFileIds,
-              cachedFileIds,
-              pendingFileIds,
+              cacheFileIds,
+              uploadFileIds,
             });
           } else {
             await setUri(id, dataUri);
             log(`Cache3: Fetched and cached mounted file ${id}`, {
               fetchIds,
               mountedFileIds,
-              cachedFileIds,
-              pendingFileIds,
+              cacheFileIds,
+              uploadFileIds,
             });
           }
         } catch (error) {
@@ -463,46 +458,35 @@ const useLiveCacheManager = ({
 };
 
 /**
- * Hook to trigger refresh of non-pending files.
+ * Hook to trigger refresh.
  */
-const useClearNonPendingFiles = ({
+const useClearCacheIds = ({
   cachedFileIds,
-  pendingFileIds,
   deleteUri,
 }: {
   cachedFileIds: FileId[] | Loading;
-  pendingFileIds: FileId[] | Loading;
   deleteUri: ManagedUriStorage["deleteUri"] | Disabled;
 }): ((ids?: string[]) => Promise<void>) | undefined =>
   useMemo(
     () =>
-      typeof cachedFileIds !== "object" ||
-      typeof pendingFileIds !== "object" ||
-      !deleteUri
+      typeof cachedFileIds !== "object" || !deleteUri
         ? undefined
         : async (ids: string[] = cachedFileIds) => {
-            const nonPendingCachedIds = ids.filter(
-              (id) => !pendingFileIds.includes(id),
-            );
-
-            log("Start clearing non-pending files...", {
-              count: nonPendingCachedIds.length,
+            log("Start clearing cached files...", {
+              count: ids.length,
             });
 
-            for (const id of nonPendingCachedIds) {
+            for (const id of ids) {
               try {
                 await deleteUri(id); // Clear the cache for non-pending files
-                log(`Cleared cache for non-pending file ${id}`);
+                log(`Cleared cache for file ${id}`);
               } catch (error) {
-                console.error(
-                  `Error clearing cache for non-pending file ${id}:`,
-                  error,
-                );
+                console.error(`Error clearing cache for file ${id}:`, error);
               }
             }
-            log("Finished clearing non-pending files.");
+            log("Finished clearing cached files.");
           },
-    [cachedFileIds, pendingFileIds, deleteUri],
+    [cachedFileIds, deleteUri],
   );
 
 /**
@@ -522,7 +506,7 @@ const useClearNonPendingFiles = ({
 export const FileCacheProvider = ({
   children,
   maxCache = 30,
-  maxPending = 10,
+  maxUploadCache = 10,
   maxMounted = 10,
   maxRecent = 10,
   isOnline,
@@ -530,79 +514,86 @@ export const FileCacheProvider = ({
   uploadFile,
   downloadFile,
   cacheStorage,
-  pendingIds: [pendingFileIds, setPendingFileIds] = usePendingIds(),
+  uploadStorage,
 }: FileCacheProviderProps) => {
   const mountTracker = useMountTracker({ maxMounted, maxRecent });
   const { recent: recentFileIds, mounted: mountedFileIds } = mountTracker;
 
   const {
-    ids: cachedFileIds,
-    getUri,
-    setUri,
-    deleteUri,
-    reset: resetStorage,
+    ids: cacheFileIds,
+    getUri: getCacheUri,
+    setUri: setCacheUri,
+    deleteUri: deleteCacheUri,
+    reset: resetCacheStorage,
   } = cacheStorage ?? {};
 
+  const {
+    ids: uploadFileIds,
+    getUri: getUploadUri,
+    setUri: setUploadUri,
+    deleteUri: deleteUploadUri,
+    reset: resetUploadStorage,
+  } = uploadStorage ?? {};
+
   log("FileCacheProvider1", {
-    pendingFileIds,
     mountedFileIds,
     recentFileIds,
-    cachedFileIds,
+    cacheFileIds,
+    uploadFileIds,
   });
 
   // todo: when full it loops over and over trying to evict
   // useEvictionCacheManager({
   //   maxCache,
-  //   cachedFileIds,
-  //   pendingFileIds,
+  //   cacheFileIds,
   //   recentFileIds,
   //   mountedFileIds,
-  //   setUri,
+  //   setUri: setCacheUri,
   // });
 
   // todo: it may start fetching while sync is in progress, causing double fetch
-  // also it may cause an infinite render loop in react somehow
+  // todo: it may cause an infinite render loop in react sometimes
   useLiveCacheManager({
     isOnline,
     mountedFileIds,
-    cachedFileIds,
-    pendingFileIds,
+    cacheFileIds,
+    uploadFileIds,
     downloadFile,
-    setUri,
+    setUri: setCacheUri,
+    maxMounted,
   });
 
-  const refreshNonPending = useClearNonPendingFiles({
-    cachedFileIds,
-    pendingFileIds,
-    deleteUri,
+  const refreshNonPending = useClearCacheIds({
+    cachedFileIds: cacheFileIds,
+    deleteUri: deleteCacheUri,
   });
 
   /**
    * Synchronize pending files by uploading each one.
    *
    * For each file ID in the pending list, the corresponding DataUri is loaded
-   * from pending storage and then uploaded remotely. Upon successful upload,
-   * the file ID is removed from the pending list.
+   * from upload storage and then uploaded remotely. Upon successful upload,
+   * the file data is moved from upload storage to cache storage.
    */
   const syncPendingFiles: ((signal?: AbortSignal) => Promise<void>) | Disabled =
-    pendingFileIds && setPendingFileIds && getUri && uploadFile
+    uploadFileIds &&
+    setUploadUri &&
+    getUploadUri &&
+    uploadFile &&
+    setCacheUri &&
+    deleteUploadUri &&
+    downloadFile
       ? async (signal?: AbortSignal): Promise<void> => {
-          log("Start upload pending list...", { count: pendingFileIds.length });
-          for (const id of pendingFileIds) {
+          log("Start upload pending list...", { count: uploadFileIds.length });
+          for (const id of uploadFileIds) {
             if (signal?.aborted) throw new Error("Upload aborted");
 
             try {
-              const dataUri = await getUri(id);
+              const dataUri = await getUploadUri(id);
               if (signal?.aborted) throw new Error("Upload aborted");
 
-              if (dataUri == undefined) {
-                setPendingFileIds((prev) =>
-                  prev.filter((pendingId) => pendingId !== id),
-                );
-                throw new Error(
-                  `Pending file not found. Removed from pending list.`,
-                );
-              }
+              if (dataUri === undefined)
+                throw new Error(`Pending file not found in upload storage.`);
 
               log(`Start upload pending file...`, {
                 id,
@@ -611,12 +602,25 @@ export const FileCacheProvider = ({
               await uploadFile(id, dataUri);
               if (signal?.aborted) throw new Error("Upload aborted");
 
+              // Confirm upload by fetching the file and comparing
+              log(`Confirming upload for file ${id}...`);
+              const fetchedDataUri = await downloadFile(id);
+              if (fetchedDataUri !== dataUri)
+                throw new Error(
+                  `Confirmation fetch failed: File not found on server after upload.`,
+                );
+              if (fetchedDataUri?.length !== dataUri?.length)
+                throw new Error(
+                  `Confirmation fetch failed: File size mismatch after upload.`,
+                );
+
+              log(`Upload confirmed for file ${id}.`);
+
               log(`Finish upload pending file.`, {
                 id,
               });
-              setPendingFileIds((prev) =>
-                prev.filter((pendingId) => pendingId !== id),
-              );
+              await setCacheUri(id, dataUri); // Move to cacheStorage after successful upload
+              await deleteUploadUri(id); // Clean up uploadStorage after upload & cache
             } catch (error) {
               if (signal?.aborted) throw error;
 
@@ -624,6 +628,7 @@ export const FileCacheProvider = ({
                 `syncPendingFilesE1: Error upload pending file ${id}: ${error}`,
                 { cause: error },
               );
+              // todo: move the file to a 3rd storage, uploadFailCache
             }
           }
           log("Finish upload pending list.");
@@ -639,42 +644,41 @@ export const FileCacheProvider = ({
    * adding a new one. If the cache has old ids not in the list, remove them from cache.
    */
   const syncLatestFiles: ((signal?: AbortSignal) => Promise<void>) | Disabled =
-    getCacheableIds && cachedFileIds && setUri && downloadFile
+    getCacheableIds && cacheFileIds && setCacheUri && downloadFile
       ? async (signal?: AbortSignal) => {
-          assert(cachedFileIds);
-          assert(pendingFileIds);
+          assert(cacheFileIds);
           assert(mountedFileIds);
           assert(recentFileIds);
 
           // Start with a copy of the current cached file IDs.
-          const cacheableCount = maxCache - (pendingFileIds?.length ?? 0);
-          let currentCachedIds = [...cachedFileIds];
-          const idsToFetch =
-            (await getCacheableIds(cacheableCount))?.filter(
-              (id) => !currentCachedIds.includes(id),
-            ) ?? [];
+          const cacheableCount = ((maxCache * 3) / 4) | 0;
+          let currentCachedIds = [...cacheFileIds];
+          const idsToFetch = [
+            ...recentFileIds,
+            ...((await getCacheableIds(cacheableCount)) ?? []),
+          ]
+            .filter((id) => !currentCachedIds.includes(id))
+            .slice(0, cacheableCount);
 
           log("Start fetching...", { count: idsToFetch.length });
           for (const id of idsToFetch) {
             if (signal?.aborted) throw new Error("Sync aborted");
 
-            // Check if cache is full (reserve space for pending items)
+            // Check if cache is full
             if (currentCachedIds.length >= maxCache) {
-              log(`Try to make space...`);
+              log(`Try to make space in cacheStorage...`);
               const evicted = await evictCacheItem(
                 currentCachedIds,
-                pendingFileIds,
                 mountedFileIds,
                 recentFileIds,
-                setUri,
+                setCacheUri,
               );
               if (!evicted) {
                 log(
-                  `Unable to evict cache item to make space. Stop fetching for cache.`,
+                  `Unable to evict cache item to make space in cacheStorage. Stop fetching for cache.`,
                   {
                     fetchFileId: id,
                     currentCachedIds,
-                    pendingFileIds,
                     mountedFileIds,
                     recentFileIds,
                   },
@@ -696,7 +700,7 @@ export const FileCacheProvider = ({
               if (dataUri === null) {
                 log(`File ${id} is deleted. Not added to cache.`);
               } else {
-                await setUri(id, dataUri);
+                await setCacheUri(id, dataUri);
                 currentCachedIds.push(id);
                 log(`File ${id} fetched and cached.`);
               }
@@ -762,27 +766,21 @@ export const FileCacheProvider = ({
             log("Sync finished");
           }
         : undefined,
-    [
-      syncPendingFiles,
-      syncLatestFiles,
-      pendingFileIds,
-      mountedFileIds,
-      recentFileIds,
-    ],
+    [syncPendingFiles, syncLatestFiles, mountedFileIds, recentFileIds],
   );
 
   /**
-   * Function to reset the file cache, deleting all cached files and clearing lists.
+   * Function to reset the file cache, deleting all cached and pending files and clearing lists.
    */
   const reset = useMemo(
     () =>
-      resetStorage && setPendingFileIds
+      resetCacheStorage && resetUploadStorage
         ? async () => {
             log("FileCache reset started");
-            await resetStorage();
-            log("UriStorage reset completed");
-            await setPendingFileIds([]);
-            log("Pending IDs cleared");
+            await resetCacheStorage();
+            log("Cache UriStorage reset completed");
+            await resetUploadStorage();
+            log("Upload UriStorage reset completed");
 
             mountTracker.reset();
             log("Recent and Mounted IDs cleared");
@@ -790,7 +788,7 @@ export const FileCacheProvider = ({
             log("FileCache reset finished");
           }
         : undefined,
-    [resetStorage, setPendingFileIds],
+    [resetCacheStorage, resetUploadStorage],
   );
 
   /**
@@ -802,8 +800,10 @@ export const FileCacheProvider = ({
   const useItem = (
     fileId?: FileId,
   ): AsyncState<DataUri | null | undefined> | Disabled => {
-    const [dataUri, setDataUri]: AsyncState<DataUri | null | undefined> =
+    const [dataUri, setCacheUri]: AsyncState<DataUri | null | undefined> =
       useManagedUriItem(fileId, cacheStorage) ?? [];
+    const [uploadUri, setUploadUri]: AsyncState<DataUri | null | undefined> =
+      useManagedUriItem(fileId, uploadStorage) ?? [];
 
     // Register the fileId with the mount tracker.
     // This will automatically update both the mounted and recent lists.
@@ -814,63 +814,41 @@ export const FileCacheProvider = ({
       useMemo(
         () =>
           fileId !== undefined &&
-          setDataUri &&
-          pendingFileIds &&
-          setPendingFileIds
-            ? async (data) => {
-                // Add the fileId to pending uploads.
-                await addToPending(fileId);
-                // Update the actual cached DataUri.
-                return setDataUri(data);
-              }
+          setUploadUri &&
+          uploadFileIds &&
+          uploadFileIds.length < maxUploadCache
+            ? async (data) => setUploadUri(data)
             : undefined,
-        [fileId, setDataUri, pendingFileIds, setPendingFileIds, maxPending],
+        [fileId, setUploadUri, uploadFileIds, maxUploadCache],
       );
-    return [dataUri, setItem];
+    return [uploadUri === undefined ? dataUri : uploadUri, setItem];
   };
 
   const getItem = cacheStorage?.getUri;
 
-  async function addToPending(fileId: FileId) {
-    assert(pendingFileIds);
-    assert(setPendingFileIds);
-    if (maxPending !== undefined && pendingFileIds.length >= maxPending)
-      throw new Error(
-        "useItemE1: Pending file limit reached. Cannot add more files to upload.",
-        {
-          cause: {
-            fileId,
-            maxPending,
-            pendingLength: pendingFileIds.length,
-          },
-        },
-      );
-
-    // Add the fileId to pending uploads.
-    // Whether it has new data or is null/deleted.
-    await setPendingFileIds((prev) => addToLimitedQueue(prev, fileId));
-  }
-
   /**
    * Hook to retrieve the list of cached file IDs.
    */
-  const useCacheList = useCallback((): FileId[] | Loading => {
-    return cachedFileIds;
-  }, [cachedFileIds]);
+  const useCacheList = useCallback(
+    (): FileId[] | Loading => cacheFileIds,
+    [cacheFileIds],
+  );
 
   /**
    * Hook to retrieve the list of pending file IDs.
    */
-  const usePendingList = useCallback((): FileId[] | Loading => {
-    return pendingFileIds;
-  }, [pendingFileIds]);
+  const usePendingList = useCallback(
+    (): FileId[] | Loading => uploadFileIds,
+    [uploadFileIds],
+  );
 
   /**
    * Hook to retrieve the list of recent file IDs.
    */
-  const useRecentList = useCallback((): FileId[] | Loading => {
-    return recentFileIds;
-  }, [recentFileIds]);
+  const useRecentList = useCallback(
+    (): FileId[] | Loading => recentFileIds,
+    [recentFileIds],
+  );
 
   const value = useMemo(
     () => ({
