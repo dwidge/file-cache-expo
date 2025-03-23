@@ -44,8 +44,8 @@ import { getDataUriFromBufferBin, getMetaBufferFromDataUri } from "./uri.js";
 import { ManagedUriStorage, useManagedUriItem } from "./useLocalUri.js";
 import { useMountTracker, useMountTrackerItem } from "./useMountTracker.js";
 
-// const log = (...args) => {};
-const log = (...args) => console.log(...args);
+const log = (...args) => {};
+// const log = (...args) => console.log(...args);
 
 /**
  * The API exposed by the File Cache system.
@@ -66,6 +66,10 @@ export type FileCache = {
    * Hook to get a list of file IDs in the cache that are pending upload.
    */
   usePendingList: () => FileId[] | Loading;
+  /**
+   * Hook to get a list of file IDs in the cache that are in error during upload.
+   */
+  useErrorList: () => FileId[] | Loading;
   /**
    * Trigger a sync operation to upload pending files from cache and download speculative files to cache.
    * @param options - Optional parameters: an AbortSignal and a progress notifier.
@@ -92,6 +96,7 @@ export const FileCacheContext = createContext<FileCache>({
   getItem: async () => null,
   useCacheList: () => [],
   usePendingList: () => [],
+  useErrorList: () => [],
   sync: async () => {},
   reset: async () => {},
   refreshNonPending: async () => {}, // Added refreshNonPending to context
@@ -106,6 +111,8 @@ export type FileCacheProviderProps = {
   maxCache: number;
   /** Maximum number of pending items to store in upload cache. */
   maxUploadCache?: number;
+  /** Maximum number of error items to store in upload error cache. */
+  maxUploadErrorCache?: number;
   /** Maximum number of mounted items to fetch automatically when online. */
   maxMounted?: number;
   /** Maximum number of recent items to store in cache. */
@@ -130,6 +137,7 @@ export type FileCacheProviderProps = {
 
   cacheStorage?: ManagedUriStorage;
   uploadStorage?: ManagedUriStorage;
+  uploadErrorStorage?: ManagedUriStorage;
 };
 
 /* ──────────────────────────────────────────────────────────────────────────── *
@@ -490,10 +498,11 @@ const useClearCacheIds = ({
   );
 
 /**
- * The provider uses 4 lists:
+ * The provider uses 5 lists:
  *
  * - cached: ids of file binary data cached on disk/in memory
  * - pending: ids of files waiting to be uploaded
+ * - error: ids of files that failed upload
  * - mounted: ids of files currently used in the app
  * - recent: ids of recently used files
  *
@@ -507,6 +516,7 @@ export const FileCacheProvider = ({
   children,
   maxCache = 30,
   maxUploadCache = 10,
+  maxUploadErrorCache = 10,
   maxMounted = 10,
   maxRecent = 10,
   isOnline,
@@ -515,6 +525,7 @@ export const FileCacheProvider = ({
   downloadFile,
   cacheStorage,
   uploadStorage,
+  uploadErrorStorage,
 }: FileCacheProviderProps) => {
   const mountTracker = useMountTracker({ maxMounted, maxRecent });
   const { recent: recentFileIds, mounted: mountedFileIds } = mountTracker;
@@ -535,11 +546,20 @@ export const FileCacheProvider = ({
     reset: resetUploadStorage,
   } = uploadStorage ?? {};
 
+  const {
+    ids: uploadErrorFileIds,
+    getUri: getUploadErrorUri,
+    setUri: setUploadErrorUri,
+    deleteUri: deleteUploadErrorUri,
+    reset: resetUploadErrorStorage,
+  } = uploadErrorStorage ?? {};
+
   log("FileCacheProvider1", {
     mountedFileIds,
     recentFileIds,
     cacheFileIds,
     uploadFileIds,
+    uploadErrorFileIds,
   });
 
   // todo: when full it loops over and over trying to evict
@@ -582,7 +602,8 @@ export const FileCacheProvider = ({
     uploadFile &&
     setCacheUri &&
     deleteUploadUri &&
-    downloadFile
+    downloadFile &&
+    setUploadErrorUri
       ? async (signal?: AbortSignal): Promise<void> => {
           log("Start upload pending list...", { count: uploadFileIds.length });
           for (const id of uploadFileIds) {
@@ -628,6 +649,18 @@ export const FileCacheProvider = ({
                 `syncPendingFilesE1: Error upload pending file ${id}: ${error}`,
                 { cause: error },
               );
+              const dataUri = await getUploadUri(id);
+              if (dataUri !== undefined) {
+                await setUploadErrorUri(id, dataUri);
+                await deleteUploadUri(id);
+                log(
+                  `syncPendingFilesE2: Moved file ${id} to uploadErrorStorage due to upload failure.`,
+                );
+              } else {
+                log(
+                  `syncPendingFilesE3: DataUri not found in uploadStorage for file ${id} after upload failure.`,
+                );
+              }
               // todo: move the file to a 3rd storage, uploadFailCache
             }
           }
@@ -774,13 +807,15 @@ export const FileCacheProvider = ({
    */
   const reset = useMemo(
     () =>
-      resetCacheStorage && resetUploadStorage
+      resetCacheStorage && resetUploadStorage && resetUploadErrorStorage
         ? async () => {
             log("FileCache reset started");
             await resetCacheStorage();
             log("Cache UriStorage reset completed");
             await resetUploadStorage();
             log("Upload UriStorage reset completed");
+            await resetUploadErrorStorage();
+            log("Upload Error UriStorage reset completed");
 
             mountTracker.reset();
             log("Recent and Mounted IDs cleared");
@@ -788,7 +823,7 @@ export const FileCacheProvider = ({
             log("FileCache reset finished");
           }
         : undefined,
-    [resetCacheStorage, resetUploadStorage],
+    [resetCacheStorage, resetUploadStorage, resetUploadErrorStorage],
   );
 
   /**
@@ -804,6 +839,8 @@ export const FileCacheProvider = ({
       useManagedUriItem(fileId, cacheStorage) ?? [];
     const [uploadUri, setUploadUri]: AsyncState<DataUri | null | undefined> =
       useManagedUriItem(fileId, uploadStorage) ?? [];
+    const [uploadErrorUri]: AsyncState<DataUri | null | undefined> =
+      useManagedUriItem(fileId, uploadErrorStorage) ?? [];
 
     // Register the fileId with the mount tracker.
     // This will automatically update both the mounted and recent lists.
@@ -821,7 +858,14 @@ export const FileCacheProvider = ({
             : undefined,
         [fileId, setUploadUri, uploadFileIds, maxUploadCache],
       );
-    return [uploadUri === undefined ? dataUri : uploadUri, setItem];
+    return [
+      uploadErrorUri !== undefined
+        ? uploadErrorUri
+        : uploadUri !== undefined
+          ? uploadUri
+          : dataUri,
+      setItem,
+    ]; // Prioritize error, then upload, then cache
   };
 
   const getItem = cacheStorage?.getUri;
@@ -843,6 +887,14 @@ export const FileCacheProvider = ({
   );
 
   /**
+   * Hook to retrieve the list of error file IDs.
+   */
+  const useErrorList = useCallback(
+    (): FileId[] | Loading => uploadErrorFileIds,
+    [uploadErrorFileIds],
+  );
+
+  /**
    * Hook to retrieve the list of recent file IDs.
    */
   const useRecentList = useCallback(
@@ -856,6 +908,7 @@ export const FileCacheProvider = ({
       getItem,
       useCacheList,
       usePendingList,
+      useErrorList,
       useRecentList,
       sync,
       reset,
@@ -866,6 +919,7 @@ export const FileCacheProvider = ({
       getItem,
       useCacheList,
       usePendingList,
+      useErrorList,
       useRecentList,
       sync,
       reset,
@@ -913,6 +967,14 @@ export const useFileUri = (
  */
 export const usePendingFileIds = (): FileId[] | Loading =>
   useContext(FileCacheContext).usePendingList();
+
+/**
+ * Hook to access the error file IDs.
+ *
+ * @returns Array of error file IDs.
+ */
+export const useErrorFileIds = (): FileId[] | Loading =>
+  useContext(FileCacheContext).useErrorList();
 
 /**
  * Hook to trigger file cache synchronization.

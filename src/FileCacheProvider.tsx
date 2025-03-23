@@ -52,8 +52,10 @@ export const FileCacheProvider2 = ({
   maxCache,
   maxRecent,
   maxUploadCache,
+  maxUploadErrorCache,
   cachePath,
   uploadCachePath,
+  uploadErrorCachePath,
   isOnline,
   axios,
   getFilesLocal,
@@ -63,8 +65,10 @@ export const FileCacheProvider2 = ({
   maxCache: number;
   maxRecent: number;
   maxUploadCache?: number;
+  maxUploadErrorCache?: number;
   cachePath?: string;
   uploadCachePath?: string;
+  uploadErrorCachePath?: string;
   isOnline: boolean;
   axios?: AxiosInstance;
   getFilesLocal?: ApiGetList<FileRecord>;
@@ -75,6 +79,7 @@ export const FileCacheProvider2 = ({
     <FileCacheProvider
       maxCache={maxCache}
       maxUploadCache={maxUploadCache}
+      maxUploadErrorCache={maxUploadErrorCache}
       maxRecent={maxRecent}
       isOnline={isOnline}
       getCacheableIds={useGetCacheableIds(getFilesLocal)}
@@ -83,6 +88,9 @@ export const FileCacheProvider2 = ({
       cacheStorage={useManagedUriStorage(usePlatformLocalStorage(cachePath))}
       uploadStorage={useManagedUriStorage(
         usePlatformLocalStorage(uploadCachePath),
+      )}
+      uploadErrorStorage={useManagedUriStorage(
+        usePlatformLocalStorage(uploadErrorCachePath),
       )}
     >
       {children}
