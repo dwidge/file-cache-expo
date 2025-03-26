@@ -1,6 +1,6 @@
 {
   "name": "@dwidge/file-cache-expo",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "description": "A file cache and sync component.",
   "repository": "github:dwidge/components-expo",
   "main": "./dist/cjs/index.js",
