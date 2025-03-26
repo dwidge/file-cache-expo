@@ -399,30 +399,38 @@ const useLiveCacheManager = ({
   setUri: ManagedUriStorage["setUri"] | Disabled;
   maxMounted?: number;
 }) => {
-  // Use a ref to prevent overlapping fetch calls.
+  // Use a ref to prevent overlapping fetch calls within the same effect execution.
   const isFetchingRef = useRef(false);
+  // Ref to track IDs that have been fetched in this session to prevent re-fetching.
+  const fetchedIdsRef = useRef<Set<FileId>>(new Set());
 
-  // Prevent fetching already cached or upload pending files and limit to maxMounted
-  const fetchIds = useMemo(
-    () =>
-      cacheFileIds && uploadFileIds
-        ? maxMounted !== undefined
-          ? mountedFileIds.slice(0, maxMounted)
-          : mountedFileIds.filter(
-              (id) =>
-                !cacheFileIds?.includes(id) && !uploadFileIds?.includes(id),
-            )
-        : undefined,
-    [mountedFileIds, maxMounted, cacheFileIds, uploadFileIds],
-  );
+  // Prevent fetching already cached, upload pending files, or already fetched in this session, and limit to maxMounted
+  const fetchIds = useMemo(() => {
+    if (!cacheFileIds || !uploadFileIds) return undefined;
+    const cachedSet = new Set(cacheFileIds);
+    const uploadSet = new Set(uploadFileIds);
+    return maxMounted !== undefined
+      ? mountedFileIds.slice(0, maxMounted)
+      : mountedFileIds;
+  }, [mountedFileIds, maxMounted, cacheFileIds, uploadFileIds]);
+
+  const filteredFetchIds = useMemo(() => {
+    if (!Array.isArray(fetchIds)) return [];
+    return fetchIds.filter(
+      (id) =>
+        !(cacheFileIds instanceof Array && cacheFileIds.includes(id)) && // Check if in cache
+        !(uploadFileIds instanceof Array && uploadFileIds.includes(id)) && // Check if pending upload
+        !fetchedIdsRef.current.has(id), // Check if already fetched in this session
+    );
+  }, [fetchIds, cacheFileIds, uploadFileIds]);
 
   useEffect(() => {
     if (
       !isOnline ||
-      !Array.isArray(fetchIds) ||
+      !Array.isArray(filteredFetchIds) ||
       !setUri ||
       !downloadFile ||
-      fetchIds.length === 0
+      filteredFetchIds.length === 0
     )
       return;
 
@@ -431,22 +439,23 @@ const useLiveCacheManager = ({
       if (isFetchingRef.current) return;
       isFetchingRef.current = true;
 
-      // Only fetch files that are mounted but not in cache.
-      for (const id of fetchIds) {
+      // Only fetch files that are mounted and not in cache or already fetched.
+      for (const id of filteredFetchIds) {
         log(`Cache1: Fetching mounted file ${id}...`);
         try {
           const dataUri = await downloadFile(id);
           if (dataUri == undefined) {
             log(`Cache2: No data on server for mounted file ${id}`, {
-              fetchIds,
+              filteredFetchIds,
               mountedFileIds,
               cacheFileIds,
               uploadFileIds,
             });
           } else {
             await setUri(id, dataUri);
+            fetchedIdsRef.current.add(id); // Mark as fetched in this session
             log(`Cache3: Fetched and cached mounted file ${id}`, {
-              fetchIds,
+              filteredFetchIds,
               mountedFileIds,
               cacheFileIds,
               uploadFileIds,
@@ -462,7 +471,7 @@ const useLiveCacheManager = ({
     };
 
     runLiveCache();
-  }, [isOnline, fetchIds, downloadFile, setUri]);
+  }, [isOnline, filteredFetchIds, downloadFile, setUri]);
 };
 
 /**
