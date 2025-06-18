@@ -1,6 +1,6 @@
 {
   "name": "@dwidge/file-cache-expo",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "description": "A file cache and sync component.",
   "repository": "github:dwidge/components-expo",
   "main": "./dist/cjs/index.js",
@@ -22,10 +22,10 @@
     "test": "node --enable-source-maps --test --test-name-pattern"
   },
   "peerDependencies": {
-    "@dwidge/hooks-react": "^0.0.19",
+    "@dwidge/hooks-react": "^0.0.20",
     "@dwidge/trace-js": "^0.0.11",
-    "@dwidge/crud-api-react": "^0.0.31",
-    "@dwidge/utils-js": "^0.0.19",
+    "@dwidge/crud-api-react": "^0.0.32",
+    "@dwidge/utils-js": "^0.0.20",
     "assert": "^2.1.0",
     "axios": "^1.7.7",
     "expo-file-system": "^17.0.1",
