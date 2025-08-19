@@ -47,8 +47,8 @@ export const useFileUri1 = (
 ): [
   string | null | undefined,
   ((uri: string | null, mime: string) => Promise<void>) | undefined,
-  boolean | undefined,
-  boolean | undefined,
+  boolean?,
+  boolean?,
 ] => {
   const [localUri, setLocalUri] =
     useManagedUriItem(remoteMeta ? remoteMeta.id : undefined, context) ?? [];
