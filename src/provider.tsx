@@ -551,6 +551,36 @@ export const FileCacheProvider = ({
     reset: resetUploadErrorStorage,
   } = uploadErrorStorage ?? {};
 
+  useEffect(() => {
+    const migrateOldErrors = async () => {
+      if (!uploadErrorFileIds || uploadErrorFileIds.length === 0) return;
+
+      log(
+        `Migrating ${uploadErrorFileIds.length} old upload errors to upload cache...`,
+      );
+      for (const id of uploadErrorFileIds) {
+        try {
+          const errorUri = await getUploadErrorUri?.(id);
+          if (errorUri !== undefined) {
+            await setUploadUri?.(id, errorUri);
+            await deleteUploadErrorUri?.(id);
+            log(`Migrated file ${id} from error cache to upload cache.`);
+          }
+        } catch (error: any) {
+          log(`Error migrating file ${id}:`, error);
+        }
+      }
+      log("Migration completed.");
+    };
+
+    migrateOldErrors();
+  }, [
+    uploadErrorFileIds,
+    getUploadErrorUri,
+    setUploadUri,
+    deleteUploadErrorUri,
+  ]);
+
   log("FileCacheProvider1", {
     mountedFileIds,
     recentFileIds,
