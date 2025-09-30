@@ -25,6 +25,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import { z } from "zod";
 import {
@@ -79,6 +80,14 @@ export type FileCache = {
    */
   useRecentList: () => FileId[] | Loading;
   /**
+   * Hook to get cache errors record.
+   */
+  useCacheErrors: () => Record<FileId, string>;
+  /**
+   * Hook to get upload errors record.
+   */
+  useUploadErrors: () => Record<FileId, string>;
+  /**
    * Trigger a sync operation to upload pending files from cache and download speculative files to cache.
    * @param options - Optional parameters: an AbortSignal and a progress notifier.
    * @returns A promise that resolves when the sync operation is complete.
@@ -98,6 +107,14 @@ export type FileCache = {
    * This will clear the cached data for non-pending files, triggering a refetch when they are next requested.
    */
   refreshNonPending?: (ids?: string[]) => Promise<void>;
+  /**
+   * Clear a specific cache error.
+   */
+  clearCacheError?: (id: FileId) => void;
+  /**
+   * Clear a specific upload error.
+   */
+  clearUploadError?: (id: FileId) => void;
 };
 
 export const FileCacheContext = createContext<FileCache>({
@@ -107,9 +124,13 @@ export const FileCacheContext = createContext<FileCache>({
   usePendingList: () => [],
   useErrorList: () => [],
   useRecentList: () => [],
+  useCacheErrors: () => ({}),
+  useUploadErrors: () => ({}),
   sync: async () => {},
   reset: async () => {},
   refreshNonPending: async () => {},
+  clearCacheError: () => {},
+  clearUploadError: () => {},
 });
 
 /**
@@ -383,6 +404,7 @@ const useLiveCacheManager = ({
   downloadFile,
   setUri,
   maxMounted,
+  setCacheErrors,
 }: {
   isOnline: boolean;
   mountedFileIds: FileId[];
@@ -391,6 +413,7 @@ const useLiveCacheManager = ({
   downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
   setUri: ManagedUriStorage["setUri"] | Disabled;
   maxMounted?: number;
+  setCacheErrors: React.Dispatch<React.SetStateAction<Record<FileId, string>>>;
 }) => {
   const isFetchingRef = useRef(false);
   const fetchedIdsRef = useRef<Set<FileId>>(new Set());
@@ -449,8 +472,12 @@ const useLiveCacheManager = ({
               uploadFileIds,
             });
           }
-        } catch (error) {
+        } catch (error: unknown) {
           log(`Cache4: Error fetching mounted file ${id}:`, error);
+          setCacheErrors((prev) => ({
+            ...prev,
+            [id]: `${error}` || "Unknown error",
+          }));
         }
       }
 
@@ -458,7 +485,7 @@ const useLiveCacheManager = ({
     };
 
     runLiveCache();
-  }, [isOnline, filteredFetchIds, downloadFile, setUri]);
+  }, [isOnline, filteredFetchIds, downloadFile, setUri, setCacheErrors]);
 };
 
 /**
@@ -543,6 +570,9 @@ export const FileCacheProvider = ({
     reset: resetUploadStorage,
   } = uploadStorage ?? {};
 
+  const [cacheErrors, setCacheErrors] = useState<Record<FileId, string>>({});
+  const [uploadErrors, setUploadErrors] = useState<Record<FileId, string>>({});
+
   const {
     ids: uploadErrorFileIds,
     getUri: getUploadErrorUri,
@@ -564,6 +594,10 @@ export const FileCacheProvider = ({
           if (errorUri !== undefined) {
             await setUploadUri?.(id, errorUri);
             await deleteUploadErrorUri?.(id);
+            setUploadErrors((prev) => ({
+              ...prev,
+              [id]: "Moved from the error cache to upload cache, ready to upload next time",
+            }));
             log(`Migrated file ${id} from error cache to upload cache.`);
           }
         } catch (error: any) {
@@ -597,6 +631,7 @@ export const FileCacheProvider = ({
     downloadFile,
     setUri: setCacheUri,
     maxMounted,
+    setCacheErrors,
   });
 
   const refreshNonPending = useClearCacheIds({
@@ -661,13 +696,22 @@ export const FileCacheProvider = ({
                 });
                 await setCacheUri(id, dataUri);
                 await deleteUploadUri(id);
-              } catch (error) {
+                setUploadErrors((prev) => {
+                  const newErrors = { ...prev };
+                  delete newErrors[id];
+                  return newErrors;
+                });
+              } catch (error: unknown) {
                 if (signal?.aborted) throw error;
 
                 log(
                   `syncPendingFilesE1: Error upload pending file ${id}: ${error}`,
                   { cause: error },
                 );
+                setUploadErrors((prev) => ({
+                  ...prev,
+                  [id]: `${error}` || "Unknown upload error",
+                }));
                 const dataUri = await getUploadUri(id);
                 if (dataUri === undefined) {
                   log(
@@ -777,14 +821,23 @@ export const FileCacheProvider = ({
                   await setCacheUri(id, dataUri);
                   currentCachedIds.push(id);
                   log(`File ${id} fetched and cached.`);
+                  setCacheErrors((prev) => {
+                    const newErrors = { ...prev };
+                    delete newErrors[id];
+                    return newErrors;
+                  });
                 }
-              } catch (error) {
+              } catch (error: unknown) {
                 if (signal?.aborted) throw error;
 
                 log(
                   `syncLatestFilesE2: Error refreshing cache for file ${id}: ${error}`,
                   { cause: error },
                 );
+                setCacheErrors((prev) => ({
+                  ...prev,
+                  [id]: `${error}` || "Unknown fetch error",
+                }));
               }
             },
             concurrency,
@@ -872,11 +925,36 @@ export const FileCacheProvider = ({
             mountTracker.reset();
             log("Recent and Mounted IDs cleared");
 
+            setCacheErrors({});
+            setUploadErrors({});
+
             log("FileCache reset finished");
           }
         : undefined,
     [resetCacheStorage, resetUploadStorage, resetUploadErrorStorage],
   );
+
+  /**
+   * Clear a specific cache error.
+   */
+  const clearCacheError = useCallback((id: FileId) => {
+    setCacheErrors((prev) => {
+      const newErrors = { ...prev };
+      delete newErrors[id];
+      return newErrors;
+    });
+  }, []);
+
+  /**
+   * Clear a specific upload error.
+   */
+  const clearUploadError = useCallback((id: FileId) => {
+    setUploadErrors((prev) => {
+      const newErrors = { ...prev };
+      delete newErrors[id];
+      return newErrors;
+    });
+  }, []);
 
   /**
    * Hook to retrieve a file’s DataUri from the cache.
@@ -951,6 +1029,16 @@ export const FileCacheProvider = ({
     [recentFileIds],
   );
 
+  /**
+   * Hook to get cache errors.
+   */
+  const useCacheErrors = useCallback(() => cacheErrors, [cacheErrors]);
+
+  /**
+   * Hook to get upload errors.
+   */
+  const useUploadErrors = useCallback(() => uploadErrors, [uploadErrors]);
+
   const value = useMemo(
     () => ({
       useItem,
@@ -959,9 +1047,13 @@ export const FileCacheProvider = ({
       usePendingList,
       useErrorList,
       useRecentList,
+      useCacheErrors,
+      useUploadErrors,
       sync,
       reset,
       refreshNonPending,
+      clearCacheError,
+      clearUploadError,
     }),
     [
       useItem,
@@ -970,9 +1062,13 @@ export const FileCacheProvider = ({
       usePendingList,
       useErrorList,
       useRecentList,
+      useCacheErrors,
+      useUploadErrors,
       sync,
       reset,
       refreshNonPending,
+      clearCacheError,
+      clearUploadError,
     ],
   );
 
@@ -1038,6 +1134,22 @@ export const useRecentFileIds = (): FileId[] | Loading =>
   useFileCache().useRecentList();
 
 /**
+ * Hook to access cache errors.
+ *
+ * @returns The cache errors record.
+ */
+export const useCacheErrorsRecord = (): Record<FileId, string> =>
+  useFileCache().useCacheErrors();
+
+/**
+ * Hook to access upload errors.
+ *
+ * @returns The upload errors record.
+ */
+export const useUploadErrorsRecord = (): Record<FileId, string> =>
+  useFileCache().useUploadErrors();
+
+/**
  * Hook to trigger file cache synchronization.
  *
  * @returns The sync function.
@@ -1065,6 +1177,26 @@ export const useFileCacheReset = () => {
 export const useFileCacheClear = () => {
   const { refreshNonPending } = useFileCache();
   return refreshNonPending;
+};
+
+/**
+ * Hook to clear a cache error.
+ *
+ * @returns The clearCacheError function.
+ */
+export const useClearCacheError = () => {
+  const { clearCacheError } = useFileCache();
+  return clearCacheError;
+};
+
+/**
+ * Hook to clear an upload error.
+ *
+ * @returns The clearUploadError function.
+ */
+export const useClearUploadError = () => {
+  const { clearUploadError } = useFileCache();
+  return clearUploadError;
 };
 
 /**
