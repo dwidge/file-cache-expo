@@ -1,4 +1,5 @@
 export * from "./FileCacheProvider.js";
+export * from "./FileCacheDiagnostic";
 export * from "./getDataUriFromFileUri.js";
 export * from "./hooks.js";
 export * from "./provider.js";
