@@ -2,7 +2,7 @@ import { DataUri } from "./types";
 import { UriStorage, assertStorageAvailable } from "./UriStorage";
 
 export class IndexedDBStorage implements UriStorage {
-  private dbVersion = 1; // Increment database version to trigger onupgradeneeded
+  private dbVersion = 1;
   private scope: string;
   private db: Promise<IDBDatabase>;
   private objectStoreName: string;
@@ -41,7 +41,6 @@ export class IndexedDBStorage implements UriStorage {
 
     return new Promise((resolve, reject) => {
       try {
-        // Add try-catch block around transaction creation
         const transaction = db.transaction([objectStoreName], transactionMode);
         const store = transaction.objectStore(objectStoreName);
         const request = operation(store);
@@ -73,8 +72,7 @@ export class IndexedDBStorage implements UriStorage {
           );
         };
       } catch (transactionError) {
-        // Catch transaction creation error
-        reject(this.createError("transactionCreate", String(transactionError))); // Reject promise if transaction fails to create
+        reject(this.createError("transactionCreate", String(transactionError)));
       }
     });
   }
@@ -108,7 +106,6 @@ export class IndexedDBStorage implements UriStorage {
     uri: DataUri | null | undefined,
   ): Promise<DataUri | null | undefined> => {
     if (uri === null) {
-      // Store null directly in IndexedDB for null URI
       return this.runRequest<DataUri>("readwrite", (store) =>
         store.put(null, id),
       ).then(() => null);
@@ -128,7 +125,7 @@ export class IndexedDBStorage implements UriStorage {
   getIds = async (): Promise<string[]> => {
     return this.runRequest<IDBValidKey[]>("readonly", (store) =>
       store.getAllKeys(),
-    ).then((keys) => (keys || []).map(String)) as Promise<string[]>; // Ensure keys is not null
+    ).then((keys) => (keys || []).map(String)) as Promise<string[]>;
   };
 
   reset = async (): Promise<void> => {

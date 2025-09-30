@@ -50,7 +50,6 @@ import { ManagedUriStorage, useManagedUriItem } from "./useLocalUri.js";
 import { useMountTracker, useMountTrackerItem } from "./useMountTracker.js";
 
 const log = (...args) => {};
-// const log = (...args) => console.log(...args);
 
 /**
  * The API exposed by the File Cache system.
@@ -110,7 +109,7 @@ export const FileCacheContext = createContext<FileCache>({
   useRecentList: () => [],
   sync: async () => {},
   reset: async () => {},
-  refreshNonPending: async () => {}, // Added refreshNonPending to context
+  refreshNonPending: async () => {},
 });
 
 /**
@@ -153,10 +152,6 @@ export type FileCacheProviderProps = {
   uploadErrorStorage?: ManagedUriStorage;
 };
 
-/* ──────────────────────────────────────────────────────────────────────────── *
- *                         HELPER FUNCTIONS
- * ──────────────────────────────────────────────────────────────────────────── */
-
 /**
  * Evict the oldest cached file (that is not pending, recent or mounted) to free cache space.
  *
@@ -177,7 +172,6 @@ const evictCacheItem = async (
     (id) => !mountedIds.includes(id) && !recentIds.includes(id),
   );
   if (candidates.length === 0) return null;
-  // For simplicity, evict the last/oldest candidate.
   const evictId = candidates[candidates.length - 1];
   assert(evictId);
   await setUri(evictId, undefined);
@@ -202,12 +196,8 @@ const addToLimitedQueue = (
   const updatedRecentIds = [id, ...ids.filter((recentId) => recentId !== id)];
   return maxIds !== undefined
     ? updatedRecentIds.slice(0, maxIds)
-    : updatedRecentIds; // Apply slice only if maxIds is provided
+    : updatedRecentIds;
 };
-
-/* ──────────────────────────────────────────────────────────────────────────── *
- *                    UPLOAD / DOWNLOAD HOOKS
- * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
  * Hook to get a function that uploads a file to remote storage.
@@ -223,13 +213,11 @@ export const useUploadFileId = (
     ? async (id: FileId, data: DataUri | Deleted): Promise<void> => {
         log(`useUploadFileId1`, id, data?.length);
         if (data === null) {
-          // If the file is to be deleted, you could call a remote deletion API here.
           log(
             `File ${id} marked for deletion; not implemented, skipping upload.`,
           );
           return;
         }
-        // Process the DataUri to extract binary data and metadata.
         const file = await getMetaBufferFromDataUri(data);
         if (!file)
           throw new Error(
@@ -238,7 +226,6 @@ export const useUploadFileId = (
           );
 
         const { meta, buffer } = file;
-        // Retrieve signed URLs.
         const fileRecord = await getUrls({ id });
         const { getUrl, putUrl } = fileRecord ?? {};
         if (!putUrl || !getUrl) {
@@ -276,17 +263,14 @@ export const useDownloadFileId = (
   getUrls
     ? async (id: FileId): Promise<DataUri | null | undefined> => {
         const record: Partial<FileRecord> | null = await getUrls({ id });
-        if (!record) return undefined; // File record is null
-
-        // Here we assume that the remote metadata (size, mime, sha256) is available.
-        // In practice you might need to call an API to get complete file meta.
+        if (!record) return undefined;
 
         if (
           record.size === null &&
           record.mime === null &&
           record.sha256 === null
         )
-          return null; // File data is null
+          return null;
 
         if (record.size == null || record.mime == null || record.sha256 == null)
           throw new Error(
@@ -327,10 +311,6 @@ const useGetUrlsMock =
     return {};
   };
 
-/* ──────────────────────────────────────────────────────────────────────────── *
- *                           FILECACHE PROVIDER
- * ──────────────────────────────────────────────────────────────────────────── */
-
 /**
  * Hook to manage cache eviction.
  * This hook runs in useEffect within FileCacheProvider and evicts old cache items.
@@ -354,7 +334,7 @@ const useEvictionCacheManager = ({
       typeof recentFileIds !== "object" ||
       !setUri
     ) {
-      return; // Wait for lists and storage to be loaded
+      return;
     }
 
     const runEviction = async () => {
@@ -379,7 +359,7 @@ const useEvictionCacheManager = ({
               maxCache,
             },
           );
-          break; // Prevent infinite loop if no item can be evicted
+          break;
         }
         currentCachedIds = currentCachedIds.filter(
           (cachedId) => cachedId !== evictedId,
@@ -412,12 +392,9 @@ const useLiveCacheManager = ({
   setUri: ManagedUriStorage["setUri"] | Disabled;
   maxMounted?: number;
 }) => {
-  // Use a ref to prevent overlapping fetch calls within the same effect execution.
   const isFetchingRef = useRef(false);
-  // Ref to track IDs that have been fetched in this session to prevent re-fetching.
   const fetchedIdsRef = useRef<Set<FileId>>(new Set());
 
-  // Prevent fetching already cached, upload pending files, or already fetched in this session, and limit to maxMounted
   const fetchIds = useMemo(() => {
     if (!cacheFileIds || !uploadFileIds) return undefined;
     const cachedSet = new Set(cacheFileIds);
@@ -431,9 +408,9 @@ const useLiveCacheManager = ({
     if (!Array.isArray(fetchIds)) return [];
     return fetchIds.filter(
       (id) =>
-        !(cacheFileIds instanceof Array && cacheFileIds.includes(id)) && // Check if in cache
-        !(uploadFileIds instanceof Array && uploadFileIds.includes(id)) && // Check if pending upload
-        !fetchedIdsRef.current.has(id), // Check if already fetched in this session
+        !(cacheFileIds instanceof Array && cacheFileIds.includes(id)) &&
+        !(uploadFileIds instanceof Array && uploadFileIds.includes(id)) &&
+        !fetchedIdsRef.current.has(id),
     );
   }, [fetchIds, cacheFileIds, uploadFileIds]);
 
@@ -448,11 +425,9 @@ const useLiveCacheManager = ({
       return;
 
     const runLiveCache = async () => {
-      // If a fetch is already in progress, do not start another.
       if (isFetchingRef.current) return;
       isFetchingRef.current = true;
 
-      // Only fetch files that are mounted and not in cache or already fetched.
       for (const id of filteredFetchIds) {
         log(`Cache1: Fetching mounted file ${id}...`);
         try {
@@ -466,7 +441,7 @@ const useLiveCacheManager = ({
             });
           } else {
             await setUri(id, dataUri);
-            fetchedIdsRef.current.add(id); // Mark as fetched in this session
+            fetchedIdsRef.current.add(id);
             log(`Cache3: Fetched and cached mounted file ${id}`, {
               filteredFetchIds,
               mountedFileIds,
@@ -479,7 +454,6 @@ const useLiveCacheManager = ({
         }
       }
 
-      // Allow future fetches.
       isFetchingRef.current = false;
     };
 
@@ -508,7 +482,7 @@ const useClearCacheIds = ({
 
             for (const id of ids) {
               try {
-                await deleteUri(id); // Clear the cache for non-pending files
+                await deleteUri(id);
                 log(`Cleared cache for file ${id}`);
               } catch (error) {
                 console.error(`Error clearing cache for file ${id}:`, error);
@@ -585,17 +559,6 @@ export const FileCacheProvider = ({
     uploadErrorFileIds,
   });
 
-  // todo: when full it loops over and over trying to evict
-  // useEvictionCacheManager({
-  //   maxCache,
-  //   cacheFileIds,
-  //   recentFileIds,
-  //   mountedFileIds,
-  //   setUri: setCacheUri,
-  // });
-
-  // todo: it may start fetching while sync is in progress, causing double fetch
-  // todo: it may cause an infinite render loop in react sometimes
   useLiveCacheManager({
     isOnline,
     mountedFileIds,
@@ -650,7 +613,6 @@ export const FileCacheProvider = ({
                 await uploadFile(id, dataUri);
                 if (signal?.aborted) throw new Error("Upload aborted");
 
-                // Confirm upload by fetching the file and comparing
                 log(`Confirming upload for file ${id}...`);
                 const fetchedDataUri = await downloadFile(id);
                 if (fetchedDataUri !== dataUri)
@@ -667,8 +629,8 @@ export const FileCacheProvider = ({
                 log(`Finish upload pending file.`, {
                   id,
                 });
-                await setCacheUri(id, dataUri); // Move to cacheStorage after successful upload
-                await deleteUploadUri(id); // Clean up uploadStorage after upload & cache
+                await setCacheUri(id, dataUri);
+                await deleteUploadUri(id);
               } catch (error) {
                 if (signal?.aborted) throw error;
 
@@ -715,7 +677,6 @@ export const FileCacheProvider = ({
           assert(mountedFileIds);
           assert(recentFileIds);
 
-          // Start with a copy of the current cached file IDs.
           const cacheableCount = ((maxCache * 3) / 4) | 0;
           let currentCachedIds = [...cacheFileIds];
           const idsToFetch = [
@@ -731,7 +692,6 @@ export const FileCacheProvider = ({
             return;
           }
 
-          // Evict items if cache would be over capacity
           const numToEvict = Math.max(
             0,
             currentCachedIds.length + idsToFetch.length - maxCache,
@@ -764,7 +724,6 @@ export const FileCacheProvider = ({
             }
           }
 
-          // Only fetch files for which there is space
           const finalIdsToFetch = idsToFetch.slice(
             0,
             maxCache - currentCachedIds.length,
@@ -905,11 +864,8 @@ export const FileCacheProvider = ({
     const [uploadErrorUri]: AsyncState<DataUri | null | undefined> =
       useManagedUriItem(fileId, uploadErrorStorage) ?? [];
 
-    // Register the fileId with the mount tracker.
-    // This will automatically update both the mounted and recent lists.
     useMountTrackerItem(mountTracker, fileId);
 
-    // Create a wrapped setter that adds the fileId to the pending list if updated.
     const setItem: AsyncDispatch<DataUri | null | undefined> | undefined =
       useMemo(
         () =>
@@ -928,7 +884,7 @@ export const FileCacheProvider = ({
           ? uploadUri
           : dataUri,
       setItem,
-    ]; // Prioritize error, then upload, then cache
+    ];
   };
 
   const getItem = cacheStorage?.getUri;
@@ -996,10 +952,6 @@ export const FileCacheProvider = ({
     </FileCacheContext.Provider>
   );
 };
-
-/* ──────────────────────────────────────────────────────────────────────────── *
- *                          SUPPORTING HOOKS & CONVERTERS
- * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
  * Hook to access the file cache API.

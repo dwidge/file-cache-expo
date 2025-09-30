@@ -118,11 +118,8 @@ export const useFileCache2Uri = (
             const meta = mb
               ? mb.meta
               : { size: null, mime: null, sha256: null };
-            // console.log("setMeta1", meta, resolvedUri?.length ?? null);
-            // Update meta data of the file
             await setFiles([{ id: fileId, ...meta }]);
           }
-          // Update the data cache
           return (await setUri(resolvedUri)) ?? null;
         }
       : undefined;

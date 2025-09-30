@@ -42,7 +42,6 @@ export const useLocalDataUri = (
         const { id } = file;
 
         if (uri === null) {
-          // Clear metadata if no data URI.
           const meta = { size: null, mime: null, sha256: null };
           await setFile({ id, ...meta });
           await setCache(uri);
@@ -80,7 +79,6 @@ export const useRemoteDataUri = (
   axiosInstance: AxiosInstance,
   getFileUrls?: GetFileUrls,
 ): AsyncState<DataUri | null> => {
-  // Helper to fetch the remote data URI.
   const fetchRemoteDataUri = useMemo(() => {
     if (!file || !setCache) return undefined;
     return async (): Promise<DataUri | null> => {
@@ -107,7 +105,6 @@ export const useRemoteDataUri = (
     };
   }, [file, setCache, axiosInstance]);
 
-  // Setter that also handles remote upload.
   const updateRemoteDataUri: AsyncDispatch<DataUri | null> | undefined =
     useMemo(() => {
       if (!file || !getFileUrls || !setFile || !setCache) return undefined;
@@ -128,7 +125,6 @@ export const useRemoteDataUri = (
           await setFile({ id, ...meta });
           await setCache(uri);
 
-          // Fetch file signed urls from the remote source.
           const urls = await getFileUrls({ id });
           if (!urls)
             throw new Error("updateRemoteDataUriE1: Failed to get file urls");
@@ -151,7 +147,6 @@ export const useRemoteDataUri = (
       };
     }, [file, setFile, setCache, getFileUrls, axiosInstance]);
 
-  // Auto-fetch remote data if not cached or the file changes.
   useEffect(() => {
     if (cache === null && file && setCache && fetchRemoteDataUri) {
       setCache(fetchRemoteDataUri);
@@ -181,10 +176,8 @@ export const useCacheFileUri = (
   axios: AxiosInstance,
   getFileUrls?: GetFileUrls,
 ): AsyncState<DataUri | null | undefined> => {
-  // Retrieve the locally cached URI
   const [localCache, setLocalCache] = useManagedUriItem(fileId, context) ?? [];
 
-  // Try to fetch file if not in cache
   useRemoteDataUri(
     [file, setFile],
     [localCache, setLocalCache],

@@ -8,10 +8,12 @@ export const isFileUri = (v: string): v is FileUri => v.startsWith("file:");
 export const isDataUri = (v: string): v is DataUri => v.startsWith("data:");
 
 export const asFileUri = (v: string): FileUri => (
-  assert(isFileUri(v), `Not a File URI: "${v}"`), v
+  assert(isFileUri(v), `Not a File URI: "${v}"`),
+  v
 );
 export const asDataUri = (v: string): DataUri => (
-  assert(isDataUri(v), `Not a Data URI: "${v}"`), v
+  assert(isDataUri(v), `Not a Data URI: "${v}"`),
+  v
 );
 
 /**
@@ -262,7 +264,7 @@ export const getIdMimeFromFilename = (
 ): { id: string; mime: MIME | undefined } => {
   const parts = filename.split(".");
   const id = parts[0];
-  const mime = parts.slice(1).join("/") as MIME; // Reconstruct mime type
+  const mime = parts.slice(1).join("/") as MIME;
   return { id, mime };
 };
 

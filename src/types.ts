@@ -7,12 +7,12 @@ import { AsyncState } from "@dwidge/hooks-react";
 export type FileUri = string & { readonly __brand: "FileUri" };
 /** Data URI type alias. */
 export type DataUri = string & { readonly __brand: "DataUri" };
-/* Represents a SHA-256 hash in hex format. */
+/** Represents a SHA-256 hash in hex format. */
 export type Sha256Hex = string;
 export type Base64 = string;
-/*  Represents the MIME type of a file. */
+/** Represents the MIME type of a file. */
 export type MIME = string;
-/* Represents an unsigned integer.*/
+/** Represents an unsigned integer.*/
 export type Uint = number;
 
 /**

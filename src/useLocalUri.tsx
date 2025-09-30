@@ -51,10 +51,8 @@ export const useManagedUriStorage = (
 ): ManagedUriStorage | Disabled => {
   const { getIds, getUri, setUri, deleteUri, reset } = context ?? {};
 
-  // Maintain a record of observed files to trigger updates in hooks.
   const [items, setItems] = useState<Record<string, {}> | undefined>(undefined);
 
-  // If the storage has a getIds() method, fetch the current IDs once.
   useEffect(() => {
     let isMounted = true;
     setItems(undefined);
@@ -69,7 +67,6 @@ export const useManagedUriStorage = (
     };
   }, [getIds]);
 
-  // Updates the items state as needed.
   const myDeleteUri = useMemo(
     () =>
       deleteUri
@@ -88,12 +85,10 @@ export const useManagedUriStorage = (
     [deleteUri, setItems],
   );
 
-  // Updates the items state as needed.
   const mySetUri = useMemo(
     () =>
       setUri && myDeleteUri
         ? async (id: string, data: DataUri | null | undefined) => {
-            // console.log("mySetUri1", id, data?.length ?? null);
             if (data === undefined) return myDeleteUri(id);
 
             await setUri(id, data);
@@ -104,13 +99,12 @@ export const useManagedUriStorage = (
     [setUri, setItems],
   );
 
-  // Calls the storage reset and clears local items.
   const myReset = useMemo(
     () =>
       reset
         ? async () => {
             await reset();
-            setItems({}); // Clear all ids and signals on reset
+            setItems({});
           }
         : undefined,
     [reset],
@@ -158,10 +152,8 @@ export const useManagedUriItem = (
     undefined,
   );
 
-  // Tracks changes in items for the current id.
   const [item, setItem] = useRecordItem([items, undefined], id);
 
-  // On mount or when id or item changes, fetch the current URI.
   useEffect(() => {
     if (id && getUri && setValue) {
       getUri(id).then((v) => setValue(v ?? undefined));

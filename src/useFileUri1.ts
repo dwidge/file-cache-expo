@@ -1,7 +1,3 @@
-// Copyright DWJ 2024.
-// Distributed under the Boost Software License, Version 1.0.
-// https://www.boost.org/LICENSE_1_0.txt
-
 import assert from "assert";
 import { AxiosInstance } from "axios";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -100,7 +96,7 @@ export const useFileUri1 = (
                   ? await getDataUriFromFileUri(uri)
                   : null;
               setLocalUri(dataUri);
-              return dataUri; // Indicate success
+              return dataUri;
             } catch (error) {
               console.warn("useFileUri: Error processing URI:", error);
               setLocalUri(null);
@@ -288,12 +284,11 @@ export const useFileUri1 = (
     [processAndSetLocalUri, resetFileState],
   );
 
-  // Effect to handle uploading when localUri is available and differs from remoteMeta
   useEffect(() => {
-    if (isUploading || isDownloading) return; // busy transferring binary
-    if (localUri === undefined) return; // busy loading local
-    if (remoteMeta === undefined) return; // busy loading remote
-    if (remoteMeta === null) return; // remote has not been created
+    if (isUploading || isDownloading) return;
+    if (localUri === undefined) return;
+    if (remoteMeta === undefined) return;
+    if (remoteMeta === null) return;
 
     const syncFile = async () => {
       if (localUri && remoteMeta) {
@@ -321,7 +316,6 @@ export const useFileUri1 = (
             );
           }
         } else if (localUri) {
-          // Remote meta might be missing some data, initiate upload to sync
           console.log(
             "useFileUri: Remote metadata possibly incomplete, initiating upload for:",
             remoteMeta.id,

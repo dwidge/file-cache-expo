@@ -99,7 +99,7 @@ export class ExpoFileStorage implements UriStorage {
    * @example `documentDirectory/myAppScope/itemId/image.jpeg`
    */
   private getFilePath(id: string, mime: MIME): string {
-    const filename = mime.replace("/", "."); // Use MIME type as filename (e.g., image.jpeg)
+    const filename = mime.replace("/", ".");
     return `${this.getIdFolderPath(id)}${filename}`;
   }
 
@@ -146,22 +146,21 @@ export class ExpoFileStorage implements UriStorage {
     try {
       const folderInfo = await FileSystem.getInfoAsync(idFolderPath);
       if (!folderInfo.exists || !folderInfo.isDirectory) {
-        return undefined; // Subfolder for ID does not exist (not found)
+        return undefined;
       }
 
       const folderContent = await readDirectorySafely(idFolderPath);
-      if (folderContent.length === 0) return null; // Empty subfolder means null URI was set
+      if (folderContent.length === 0) return null;
 
-      // Expecting only one file (MIME type file) per subfolder for valid URIs
       if (folderContent.length > 1) {
         console.warn(
           `getUriW1: Unexpected multiple files in ID folder: ${idFolderPath}. Using first file.`,
         );
       }
 
-      const mimeFilename = folderContent[0]; // Get the MIME type filename
+      const mimeFilename = folderContent[0];
       const filePath = `${idFolderPath}${mimeFilename}`;
-      const mime = mimeFilename.replace(".", "/"); // Reconstruct MIME type from filename
+      const mime = mimeFilename.replace(".", "/");
       return await readFileAsDataUri(filePath, mime as MIME);
     } catch (error: any) {
       throw new Error(`getUriE2: Error getting URI for ID '${id}'`, {
@@ -192,26 +191,22 @@ export class ExpoFileStorage implements UriStorage {
     const idFolderPath = this.getIdFolderPath(id);
 
     try {
-      // Delete existing subfolder if any before writing new one
       await deletePathIdempotently(idFolderPath);
 
-      // For undefined URI, the folder should not exist
       if (uri === undefined) return undefined;
 
-      // Ensure ID subfolder exists (or create it)
       await ensureDirectoryExists(idFolderPath);
 
       if (uri === null) {
-        // For null URI, just ensure the folder exists and is empty (no file creation)
         return null;
       } else {
         const mime = getMimeTypeFromDataUri(uri);
         const filePath = this.getFilePath(id, mime);
-        const base64String = getBase64FromDataUri(uri); // Extract base64 data
+        const base64String = getBase64FromDataUri(uri);
 
         await writeFileBase64(filePath, base64String);
 
-        return asDataUri(uri); // Return the Data URI that was set
+        return asDataUri(uri);
       }
     } catch (error: any) {
       throw new Error(`setUriE2: Error setting URI for ID '${id}': ${error}`, {
@@ -233,8 +228,8 @@ export class ExpoFileStorage implements UriStorage {
     assertStorageAvailable("ExpoFileStorage", !!FileSystem.documentDirectory);
     const idFolderPath = this.getIdFolderPath(id);
     try {
-      await deletePathIdempotently(idFolderPath); // Delete ID subfolder recursively (idempotent: no error if it doesn't exist)
-      return null; // Successful delete (or no-op if not found)
+      await deletePathIdempotently(idFolderPath);
+      return null;
     } catch (error: any) {
       throw new Error(`deleteUriE1: Error deleting URI for ID '${id}'`, {
         cause: { error, id },
@@ -258,7 +253,7 @@ export class ExpoFileStorage implements UriStorage {
     try {
       await ensureDirectoryExists(scopePath);
       const directoryContent = await readDirectorySafely(scopePath);
-      return directoryContent; // Subfolder names are the IDs
+      return directoryContent;
     } catch (error: any) {
       throw new Error(`getIdsE1: Error getting IDs`, {
         cause: { error, scopePath },
@@ -278,7 +273,7 @@ export class ExpoFileStorage implements UriStorage {
     assertStorageAvailable("ExpoFileStorage", !!FileSystem.documentDirectory);
     const scopePath = this.getScopePath();
     try {
-      await deletePathIdempotently(scopePath); // Delete scope directory and all contents recursively (idempotent: no error if it doesn't exist)
+      await deletePathIdempotently(scopePath);
     } catch (error: any) {
       throw new Error(`resetE1: Error resetting storage`, {
         cause: { error, scopePath },
@@ -322,7 +317,7 @@ const readDirectorySafely = async (
       error.message.includes("ENOENT") ||
       error.message.includes("No such directory")
     ) {
-      return []; // Directory not found is treated as empty content
+      return [];
     }
     throw new Error(
       `readDirectorySafelyE1: Error reading directory at '${directoryPath}'`,
@@ -387,7 +382,7 @@ const readFileAsDataUri = async (
     const base64String = await FileSystem.readAsStringAsync(filePath, {
       encoding: FileSystem.EncodingType.Base64,
     });
-    return asDataUri(`data:${mime};base64,${base64String}`); // Construct Data URI
+    return asDataUri(`data:${mime};base64,${base64String}`);
   } catch (error: any) {
     throw new Error(
       `readFileAsDataUriE1: Error reading file as Data URI from path '${filePath}'`,
