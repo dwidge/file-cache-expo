@@ -455,13 +455,21 @@ const useLiveCacheManager = ({
         log(`Cache1: Fetching mounted file ${id}...`);
         try {
           const dataUri = await downloadFile(id);
-          if (dataUri == undefined) {
+          if (dataUri === undefined) {
             log(`Cache2: No data on server for mounted file ${id}`, {
               filteredFetchIds,
               mountedFileIds,
               cacheFileIds,
               uploadFileIds,
             });
+            setCacheErrors((prev) => ({
+              ...prev,
+              [id]: "File not found on server (404)",
+            }));
+          } else if (dataUri === null) {
+            await setUri(id, null);
+            fetchedIdsRef.current.add(id);
+            log(`Cache2: File deleted on server for mounted file ${id}`);
           } else {
             await setUri(id, dataUri);
             fetchedIdsRef.current.add(id);
@@ -815,7 +823,13 @@ export const FileCacheProvider = ({
                 const dataUri = await downloadFile(id);
                 if (signal?.aborted) throw new Error("Sync aborted");
 
-                if (dataUri === null) {
+                if (dataUri === undefined) {
+                  log(`File ${id} not found on server. Setting error.`);
+                  setCacheErrors((prev) => ({
+                    ...prev,
+                    [id]: "File not found on server (404)",
+                  }));
+                } else if (dataUri === null) {
                   log(`File ${id} is deleted. Not added to cache.`);
                 } else {
                   await setCacheUri(id, dataUri);
