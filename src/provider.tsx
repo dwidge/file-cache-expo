@@ -41,7 +41,11 @@ import {
   GetFileUrls,
   Loading,
 } from "./types.js";
-import { getDataUriFromBufferBin, getMetaBufferFromDataUri } from "./uri.js";
+import {
+  getDataUriFromBufferBin,
+  getMetaBufferFromDataUri,
+  getSizeFromDataUri,
+} from "./uri.js";
 import { ManagedUriStorage, useManagedUriItem } from "./useLocalUri.js";
 import { useMountTracker, useMountTrackerItem } from "./useMountTracker.js";
 
@@ -668,18 +672,19 @@ export const FileCacheProvider = ({
                   { cause: error },
                 );
                 const dataUri = await getUploadUri(id);
-                if (dataUri !== undefined) {
-                  await setUploadErrorUri(id, dataUri);
-                  await deleteUploadUri(id);
+                if (dataUri === undefined) {
                   log(
-                    `syncPendingFilesE2: Moved file ${id} to uploadErrorStorage due to upload failure.`,
+                    `syncPendingFilesE21: DataUri not found in uploadStorage for file ${id} after upload failure.`,
+                  );
+                } else if (dataUri === null) {
+                  log(
+                    `syncPendingFilesE22: DataUri found in uploadStorage for file ${id} (null) after upload failure.`,
                   );
                 } else {
                   log(
-                    `syncPendingFilesE3: DataUri not found in uploadStorage for file ${id} after upload failure.`,
+                    `syncPendingFilesE23: DataUri found in uploadStorage for file ${id} (length ${getSizeFromDataUri(dataUri)}) after upload failure.`,
                   );
                 }
-                // todo: move the file to a 3rd storage, uploadFailCache
               }
             },
             concurrency,
