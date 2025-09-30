@@ -76,6 +76,10 @@ export type FileCache = {
    */
   useErrorList: () => FileId[] | Loading;
   /**
+   * Hook to get a list of recently used file IDs.
+   */
+  useRecentList: () => FileId[] | Loading;
+  /**
    * Trigger a sync operation to upload pending files from cache and download speculative files to cache.
    * @param options - Optional parameters: an AbortSignal and a progress notifier.
    * @returns A promise that resolves when the sync operation is complete.
@@ -103,6 +107,7 @@ export const FileCacheContext = createContext<FileCache>({
   useCacheList: () => [],
   usePendingList: () => [],
   useErrorList: () => [],
+  useRecentList: () => [],
   sync: async () => {},
   reset: async () => {},
   refreshNonPending: async () => {}, // Added refreshNonPending to context
@@ -1033,6 +1038,22 @@ export const usePendingFileIds = (): FileId[] | Loading =>
  */
 export const useErrorFileIds = (): FileId[] | Loading =>
   useContext(FileCacheContext).useErrorList();
+
+/**
+ * Hook to access the cached file IDs.
+ *
+ * @returns Array of cached file IDs.
+ */
+export const useCacheFileIds = (): FileId[] | Loading =>
+  useFileCache().useCacheList();
+
+/**
+ * Hook to access the recent file IDs.
+ *
+ * @returns Array of recent file IDs.
+ */
+export const useRecentFileIds = (): FileId[] | Loading =>
+  useFileCache().useRecentList();
 
 /**
  * Hook to trigger file cache synchronization.
