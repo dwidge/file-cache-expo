@@ -249,8 +249,20 @@ export const useUploadFileId = (
         const { meta, buffer } = file;
         const fileRecord = await getUrls({ id });
         const { getUrl, putUrl } = fileRecord ?? {};
-        if (!putUrl || !getUrl) {
-          log("useUploadFileIdE2", fileRecord);
+        if (putUrl && getUrl) {
+          log(`Uploading file ${id}`);
+          await putBufferToUrlAndVerify({
+            data: buffer,
+            putUrl,
+            getUrl,
+            meta,
+            axios,
+          });
+        } else if (getUrl) {
+          log(`Confirming file ${id}`);
+          await getBufferFromUrlAndVerify({ getUrl, meta, axios });
+        } else {
+          log(`Can't upload file ${id}`, fileRecord);
           throw new Error(
             `useUploadFileIdE2: Missing upload URLs for file ${id}`,
             {
@@ -259,14 +271,6 @@ export const useUploadFileId = (
           );
         }
 
-        log(`Uploading file ${id}`);
-        await putBufferToUrlAndVerify({
-          data: buffer,
-          putUrl,
-          getUrl,
-          meta,
-          axios,
-        });
         log(`File ${id} upload successful`);
       }
     : undefined;
