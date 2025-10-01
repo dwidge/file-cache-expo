@@ -80,6 +80,11 @@ export type FileCache = {
    */
   useRecentList: () => FileId[] | Loading;
   /**
+   * Hook to get a list of file IDs that are missing on the server (404).
+   * These are files with non null meta data but have not yet been uploaded.
+   */
+  useMissingList: () => FileId[] | Loading;
+  /**
    * Hook to get cache errors record.
    */
   useCacheErrors: () => Record<FileId, string>;
@@ -124,6 +129,7 @@ export const FileCacheContext = createContext<FileCache>({
   usePendingList: () => [],
   useErrorList: () => [],
   useRecentList: () => [],
+  useMissingList: () => [],
   useCacheErrors: () => ({}),
   useUploadErrors: () => ({}),
   sync: async () => {},
@@ -288,7 +294,11 @@ export const useDownloadFileId = (
   getUrls
     ? async (id: FileId): Promise<DataUri | null | undefined> => {
         const record: Partial<FileRecord> | null = await getUrls({ id });
-        if (!record) return undefined;
+        if (!record)
+          throw new Error(
+            `useDownloadFileIdE2: No record/meta found for file id ${id}`,
+            { cause: { id } },
+          );
 
         if (
           record.size === null &&
@@ -303,10 +313,11 @@ export const useDownloadFileId = (
             { cause: { fileMeta: record } },
           );
 
-        if (!record.getUrl) {
-          log(`No download URL available for file ${id}`);
-          return undefined;
-        }
+        if (!record.getUrl)
+          throw new Error(
+            `useDownloadFileIdE3: No download URL available for file id ${id}`,
+            { cause: { id } },
+          );
 
         const meta: FileMeta = {
           size: record.size,
@@ -409,6 +420,7 @@ const useLiveCacheManager = ({
   setUri,
   maxMounted,
   setCacheErrors,
+  setMissingFileIds,
 }: {
   isOnline: boolean;
   mountedFileIds: FileId[];
@@ -418,6 +430,7 @@ const useLiveCacheManager = ({
   setUri: ManagedUriStorage["setUri"] | Disabled;
   maxMounted?: number;
   setCacheErrors: React.Dispatch<React.SetStateAction<Record<FileId, string>>>;
+  setMissingFileIds: React.Dispatch<React.SetStateAction<FileId[]>>;
 }) => {
   const isFetchingRef = useRef(false);
   const fetchedIdsRef = useRef<Set<FileId>>(new Set());
@@ -466,17 +479,16 @@ const useLiveCacheManager = ({
               cacheFileIds,
               uploadFileIds,
             });
-            setCacheErrors((prev) => ({
-              ...prev,
-              [id]: "File not found on server (404)",
-            }));
+            setMissingFileIds((prev) => [...new Set([...prev, id])]);
           } else if (dataUri === null) {
             await setUri(id, null);
             fetchedIdsRef.current.add(id);
+            setMissingFileIds((prev) => prev.filter((p) => p !== id));
             log(`Cache2: File deleted on server for mounted file ${id}`);
           } else {
             await setUri(id, dataUri);
             fetchedIdsRef.current.add(id);
+            setMissingFileIds((prev) => prev.filter((p) => p !== id));
             log(`Cache3: Fetched and cached mounted file ${id}`, {
               filteredFetchIds,
               mountedFileIds,
@@ -497,7 +509,17 @@ const useLiveCacheManager = ({
     };
 
     runLiveCache();
-  }, [isOnline, filteredFetchIds, downloadFile, setUri, setCacheErrors]);
+  }, [
+    isOnline,
+    filteredFetchIds,
+    downloadFile,
+    setUri,
+    setCacheErrors,
+    setMissingFileIds,
+    mountedFileIds,
+    cacheFileIds,
+    uploadFileIds,
+  ]);
 };
 
 /**
@@ -584,6 +606,7 @@ export const FileCacheProvider = ({
 
   const [cacheErrors, setCacheErrors] = useState<Record<FileId, string>>({});
   const [uploadErrors, setUploadErrors] = useState<Record<FileId, string>>({});
+  const [missingFileIds, setMissingFileIds] = useState<FileId[]>([]);
 
   const {
     ids: uploadErrorFileIds,
@@ -633,6 +656,7 @@ export const FileCacheProvider = ({
     cacheFileIds,
     uploadFileIds,
     uploadErrorFileIds,
+    missingFileIds,
   });
 
   useLiveCacheManager({
@@ -644,6 +668,7 @@ export const FileCacheProvider = ({
     setUri: setCacheUri,
     maxMounted,
     setCacheErrors,
+    setMissingFileIds,
   });
 
   const refreshNonPending = useClearCacheIds({
@@ -709,6 +734,7 @@ export const FileCacheProvider = ({
                 });
                 await setCacheUri(id, dataUri);
                 await deleteUploadUri(id);
+                setMissingFileIds((prev) => prev.filter((p) => p !== id));
                 setUploadErrors((prev) => {
                   const newErrors = { ...prev };
                   delete newErrors[id];
@@ -847,16 +873,15 @@ export const FileCacheProvider = ({
                 if (signal?.aborted) throw new Error("Sync aborted");
 
                 if (dataUri === undefined) {
-                  log(`File ${id} not found on server. Setting error.`);
-                  setCacheErrors((prev) => ({
-                    ...prev,
-                    [id]: "File not found on server (404)",
-                  }));
+                  log(`File ${id} not found on server. Adding to missing.`);
+                  setMissingFileIds((prev) => [...new Set([...prev, id])]);
                 } else if (dataUri === null) {
                   log(`File ${id} is deleted. Not added to cache.`);
+                  setMissingFileIds((prev) => prev.filter((p) => p !== id));
                 } else {
                   await setCacheUri(id, dataUri);
                   currentCachedIds.push(id);
+                  setMissingFileIds((prev) => prev.filter((p) => p !== id));
                   log(`File ${id} fetched and cached.`);
                   setCacheErrors((prev) => {
                     const newErrors = { ...prev };
@@ -982,6 +1007,7 @@ export const FileCacheProvider = ({
 
             setCacheErrors({});
             setUploadErrors({});
+            setMissingFileIds([]);
 
             log("FileCache reset finished");
           }
@@ -1085,6 +1111,14 @@ export const FileCacheProvider = ({
   );
 
   /**
+   * Hook to retrieve the list of missing file IDs.
+   */
+  const useMissingList = useCallback(
+    (): FileId[] | Loading => missingFileIds,
+    [missingFileIds],
+  );
+
+  /**
    * Hook to get cache errors.
    */
   const useCacheErrors = useCallback(() => cacheErrors, [cacheErrors]);
@@ -1102,6 +1136,7 @@ export const FileCacheProvider = ({
       usePendingList,
       useErrorList,
       useRecentList,
+      useMissingList,
       useCacheErrors,
       useUploadErrors,
       sync,
@@ -1117,6 +1152,7 @@ export const FileCacheProvider = ({
       usePendingList,
       useErrorList,
       useRecentList,
+      useMissingList,
       useCacheErrors,
       useUploadErrors,
       sync,
@@ -1187,6 +1223,14 @@ export const useCacheFileIds = (): FileId[] | Loading =>
  */
 export const useRecentFileIds = (): FileId[] | Loading =>
   useFileCache().useRecentList();
+
+/**
+ * Hook to access the missing file IDs.
+ *
+ * @returns Array of missing file IDs.
+ */
+export const useMissingFileIds = (): FileId[] | Loading =>
+  useFileCache().useMissingList();
 
 /**
  * Hook to access cache errors.
