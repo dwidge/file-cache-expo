@@ -30,6 +30,7 @@
     "assert": "^2.1.0",
     "axios": "^1.7.7",
     "expo-file-system": "^17.0.1",
+    "p-limit": "^7.1.1",
     "react": "^19.0.0",
     "react-native": "^0.79.5",
     "zod": "^3.23.8"

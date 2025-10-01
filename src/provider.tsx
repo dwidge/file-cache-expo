@@ -14,9 +14,9 @@ import {
   useConvert,
   useJson,
 } from "@dwidge/hooks-react";
-import { asyncMapParallel } from "@dwidge/utils-js";
 import assert from "assert";
 import { AxiosInstance } from "axios";
+import pLimit from "p-limit";
 import {
   createContext,
   ReactNode,
@@ -667,9 +667,10 @@ export const FileCacheProvider = ({
     setUploadErrorUri
       ? async (signal, concurrency = 1): Promise<void> => {
           log("Start upload pending list...", { count: uploadFileIds.length });
-          await asyncMapParallel(
-            uploadFileIds,
-            async (id) => {
+
+          const limit = pLimit(concurrency);
+          const promises = uploadFileIds.map((id) =>
+            limit(async () => {
               if (signal?.aborted) throw new Error("Upload aborted");
 
               try {
@@ -734,11 +735,29 @@ export const FileCacheProvider = ({
                     `syncPendingFilesE23: DataUri found in uploadStorage for file ${id} (length ${getSizeFromDataUri(dataUri)}) after upload failure.`,
                   );
                 }
+
+                const enhancedError =
+                  error instanceof Error ? error : new Error(`${error}`);
+                enhancedError.message = `File ${id}: ${enhancedError.message}`;
+                enhancedError.name = `UploadError`;
+                throw enhancedError;
               }
-            },
-            concurrency,
+            }),
           );
+
           log("Finish upload pending list.");
+
+          const results = await Promise.allSettled(promises);
+          const errors = results
+            .filter((result) => result.status === "rejected")
+            .map((result) => (result as PromiseRejectedResult).reason);
+          if (errors.length > 0) {
+            const aggregateError = new AggregateError(
+              errors,
+              "One or more uploads failed",
+            );
+            throw aggregateError;
+          }
         }
       : undefined;
 
@@ -813,9 +832,9 @@ export const FileCacheProvider = ({
 
           log("Start fetching...", { count: finalIdsToFetch.length });
 
-          await asyncMapParallel(
-            finalIdsToFetch,
-            async (id) => {
+          const limit = pLimit(concurrency);
+          const promises = finalIdsToFetch.map((id) =>
+            limit(async () => {
               if (signal?.aborted) throw new Error("Sync aborted");
 
               try {
@@ -852,11 +871,29 @@ export const FileCacheProvider = ({
                   ...prev,
                   [id]: `${error}` || "Unknown fetch error",
                 }));
+
+                const enhancedError =
+                  error instanceof Error ? error : new Error(`${error}`);
+                enhancedError.message = `File ${id}: ${enhancedError.message}`;
+                enhancedError.name = `DownloadError`;
+                throw enhancedError;
               }
-            },
-            concurrency,
+            }),
           );
+
           log("Finish fetching.");
+
+          const results = await Promise.allSettled(promises);
+          const errors = results
+            .filter((result) => result.status === "rejected")
+            .map((result) => (result as PromiseRejectedResult).reason);
+          if (errors.length > 0) {
+            const aggregateError = new AggregateError(
+              errors,
+              "One or more downloads failed",
+            );
+            throw aggregateError;
+          }
         }
       : undefined;
 
