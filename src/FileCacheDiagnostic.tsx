@@ -1,5 +1,4 @@
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
+import { viewUri } from "@dwidge/expo-download-uri";
 import React, { useState } from "react";
 import {
   Alert,
@@ -29,7 +28,6 @@ interface FileDetailsProps {
   errorMessage?: string;
   onRetryUpload: (id: FileId, uri?: DataUri) => Promise<void>;
   onRetryFetch: (id: FileId) => Promise<void>;
-  onDownload: (uri: DataUri) => Promise<void>;
   onClearError?: (id: FileId) => void;
 }
 
@@ -39,7 +37,6 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
   errorMessage,
   onRetryUpload,
   onRetryFetch,
-  onDownload,
   onClearError,
 }) => (
   <View style={styles.fileDetails}>
@@ -69,7 +66,7 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
         )}
         <TouchableOpacity
           style={styles.button}
-          onPress={() => onDownload(dataUri)}
+          onPress={() => viewUri(dataUri, fileId)}
         >
           <Text>Download/View File</Text>
         </TouchableOpacity>
@@ -98,7 +95,6 @@ interface FileItemProps {
   errorMessage?: string;
   onRetryUpload: (id: FileId, uri?: DataUri) => Promise<void>;
   onRetryFetch: (id: FileId) => Promise<void>;
-  onDownload: (uri: DataUri) => Promise<void>;
   onClearError?: (id: FileId) => void;
   showRetry?: boolean;
 }
@@ -109,7 +105,6 @@ const FileItem: React.FC<FileItemProps> = ({
   errorMessage,
   onRetryUpload,
   onRetryFetch,
-  onDownload,
   onClearError,
   showRetry = false,
 }) => {
@@ -147,7 +142,6 @@ const FileItem: React.FC<FileItemProps> = ({
             errorMessage={errorMessage}
             onRetryUpload={onRetryUpload}
             onRetryFetch={onRetryFetch}
-            onDownload={onDownload}
             onClearError={onClearError}
           />
         )
@@ -205,7 +199,6 @@ interface ExpandableSectionProps {
   getDataUri: (id: FileId) => Promise<DataUri | null | undefined>;
   onRetryUpload: (id: FileId, uri?: DataUri) => Promise<void>;
   onRetryFetch: (id: FileId) => Promise<void>;
-  onDownload: (uri: DataUri) => Promise<void>;
   onClearError?: (id: FileId) => void;
   showRetry?: boolean;
   expanded: boolean;
@@ -218,7 +211,6 @@ const ExpandableSection: React.FC<ExpandableSectionProps> = ({
   getDataUri,
   onRetryUpload,
   onRetryFetch,
-  onDownload,
   onClearError,
   showRetry = false,
   expanded,
@@ -240,7 +232,6 @@ const ExpandableSection: React.FC<ExpandableSectionProps> = ({
               getDataUri={getDataUri}
               onRetryUpload={onRetryUpload}
               onRetryFetch={onRetryFetch}
-              onDownload={onDownload}
               onClearError={onClearError}
               showRetry={showRetry}
             />
@@ -331,24 +322,7 @@ export const FileCacheDiagnostic: React.FC = () => {
     await refreshNonPending?.([id]);
   };
 
-  const handleDownload = async (uri: DataUri) => {
-    if (uri.startsWith("data:")) {
-      const mime = uri.split(";")[0].split(":")[1];
-      const base64 = uri.split(",")[1];
-      const fileUri = FileSystem.cacheDirectory + "temp_file";
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: mime,
-          dialogTitle: "View File",
-        });
-      } else {
-        Alert.alert("Download", "File saved to cache");
-      }
-    }
-  };
+  const handleDownload = async (uri: DataUri, id: string) => viewUri(uri, id);
 
   const getDataUriForFile = getItem || (async () => null);
 
@@ -382,35 +356,32 @@ export const FileCacheDiagnostic: React.FC = () => {
         <Text style={styles.buttonText}>Refresh Non-Pending</Text>
       </TouchableOpacity>
       <ExpandableSection
-        title="Cache Files"
+        title="Download Cache"
         fileIds={Array.isArray(cacheIds) ? cacheIds : []}
         getDataUri={getDataUriForFile}
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
-        onDownload={handleDownload}
         onClearError={clearCacheError}
         expanded={cacheExpanded}
         onToggle={() => setCacheExpanded(!cacheExpanded)}
       />
       <ExpandableSection
-        title="Upload Pending"
+        title="Upload Cache"
         fileIds={Array.isArray(pendingIds) ? pendingIds : []}
         getDataUri={getDataUriForFile}
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
-        onDownload={handleDownload}
         onClearError={clearUploadError}
         showRetry={true}
         expanded={pendingExpanded}
         onToggle={() => setPendingExpanded(!pendingExpanded)}
       />
       <ExpandableSection
-        title="Upload Errors"
+        title="Upload Backup Cache"
         fileIds={Array.isArray(errorIds) ? errorIds : []}
         getDataUri={getDataUriForFile}
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
-        onDownload={handleDownload}
         onClearError={clearUploadError}
         showRetry={true}
         expanded={errorExpanded}
@@ -422,13 +393,12 @@ export const FileCacheDiagnostic: React.FC = () => {
         getDataUri={getDataUriForFile}
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
-        onDownload={handleDownload}
         onClearError={clearCacheError}
         expanded={recentExpanded}
         onToggle={() => setRecentExpanded(!recentExpanded)}
       />
       <ErrorsSection
-        title="Cache Errors"
+        title="Download Errors"
         errors={cacheErrors}
         onClearError={clearCacheError}
         onRetry={handleRetryError}

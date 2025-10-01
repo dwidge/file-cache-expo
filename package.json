@@ -25,6 +25,7 @@
     "@dwidge/hooks-react": "^0.0.29",
     "@dwidge/trace-js": "^0.0.12",
     "@dwidge/crud-api-react": "^0.0.42",
+    "@dwidge/expo-download-uri": "^0.0.1",
     "@dwidge/utils-js": "^0.0.25",
     "assert": "^2.1.0",
     "axios": "^1.7.7",
