@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { Expandable } from "./Expandable";
+import { useFileCache2Uri } from "./FileCacheProvider";
 import {
   useCacheErrorsRecord,
   useCacheFileIds,
@@ -41,6 +42,7 @@ interface FileDetailsProps {
   onClearError?: (id: FileId) => void;
   onManualUpload?: (id: FileId, dataUri: DataUri) => Promise<void>;
   onOpenGetUrl?: (url: string) => void;
+  setMetaUri?: ((uri: DataUri | null) => Promise<DataUri | null>) | undefined;
 }
 
 const FileDetailsInline: React.FC<FileDetailsProps> = ({
@@ -55,6 +57,7 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
   onClearError,
   onManualUpload,
   onOpenGetUrl,
+  setMetaUri,
 }) => {
   const handleOpenGetUrl = () => {
     if (urls?.getUrl && urls.getUrl !== null) {
@@ -62,7 +65,7 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
     }
   };
 
-  const handleManualUploadClick = async () => {
+  const handleRetryPickClick = async () => {
     if (
       !onManualUpload ||
       !urls?.putUrl ||
@@ -72,8 +75,8 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
       meta.mime == null
     ) {
       Alert.alert(
-        "Upload not available",
-        "Manual upload requires putUrl and complete meta data.",
+        "Retry not available",
+        "Retry pick requires putUrl and complete meta data.",
       );
       return;
     }
@@ -89,7 +92,9 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
         copyToCacheDirectory: false,
       });
 
-      const item = result.output?.item[0];
+      if (!result.output) return;
+
+      const item = result.output.item[0];
       if (!item) return;
 
       const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
@@ -171,6 +176,59 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
     }
   };
 
+  const handleChangeFileClick = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: false,
+      });
+
+      if (!result.output) return;
+
+      const item = result.output.item[0];
+      if (!item) return;
+
+      const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
+
+      const fileContent = await FileSystem.readAsStringAsync(fileUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const computedHash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        fileContent,
+        { encoding: Crypto.CryptoEncoding.BASE64 },
+      );
+
+      const newDataUri = `data:${pickedMime};base64,${fileContent}` as DataUri;
+
+      if (setMetaUri) {
+        await setMetaUri(newDataUri);
+        Alert.alert("Change", "File changed and meta updated.");
+      } else {
+        Alert.alert(
+          "Change",
+          "File data updated, but meta update not available.",
+        );
+      }
+    } catch (error) {
+      console.error("Change error:", error);
+      Alert.alert("Change Error", `Failed to change: ${error}`);
+    }
+  };
+
+  const handleDeleteClick = async () => {
+    try {
+      if (setMetaUri) {
+        await setMetaUri(null);
+        Alert.alert("Delete", "File deleted and meta nulled.");
+      } else {
+        Alert.alert("Delete", "File data nulled, but meta not available.");
+      }
+    } catch (error) {
+      console.error("Delete error:", error);
+      Alert.alert("Delete Error", `Failed to delete: ${error}`);
+    }
+  };
+
   const isGetUrlDisabled = !(urls?.getUrl && urls.getUrl !== null);
   const isPutUrlDisabled =
     !urls?.putUrl ||
@@ -179,6 +237,8 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
     meta.sha256 == null ||
     meta.mime == null ||
     !onManualUpload;
+  const isChangeDisabled = !setMetaUri;
+  const isDeleteDisabled = !setMetaUri;
 
   return (
     <View style={styles.fileDetails}>
@@ -233,13 +293,37 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.button, isPutUrlDisabled && styles.disabledButton]}
-        onPress={handleManualUploadClick}
+        onPress={handleRetryPickClick}
         disabled={isPutUrlDisabled}
       >
         <Text
           style={[styles.buttonText, isPutUrlDisabled && styles.disabledText]}
         >
-          {isPutUrlDisabled ? "No Put URL or Meta" : "Upload New File"}
+          {isPutUrlDisabled ? "No Put URL or Meta" : "Retry Pick Matching File"}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.button, isChangeDisabled && styles.disabledButton]}
+        onPress={handleChangeFileClick}
+        disabled={isChangeDisabled}
+      >
+        <Text
+          style={[styles.buttonText, isChangeDisabled && styles.disabledText]}
+        >
+          {isChangeDisabled
+            ? "No Change Available"
+            : "Change File (update meta)"}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.button, isDeleteDisabled && styles.disabledButton]}
+        onPress={handleDeleteClick}
+        disabled={isDeleteDisabled}
+      >
+        <Text
+          style={[styles.buttonText, isDeleteDisabled && styles.disabledText]}
+        >
+          {isDeleteDisabled ? "No Delete Available" : "Delete File (null meta)"}
         </Text>
       </TouchableOpacity>
       {dataUri && (
@@ -268,7 +352,6 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
 
 interface FileItemProps {
   fileId: FileId;
-  getDataUri: (id: FileId) => Promise<DataUri | null | undefined>;
   errorMessage?: string;
   onRetryUpload: (id: FileId, uri?: DataUri) => Promise<void>;
   onRetryFetch: (id: FileId) => Promise<void>;
@@ -279,7 +362,6 @@ interface FileItemProps {
 
 const FileItem: React.FC<FileItemProps> = ({
   fileId,
-  getDataUri,
   errorMessage,
   onRetryUpload,
   onRetryFetch,
@@ -289,9 +371,10 @@ const FileItem: React.FC<FileItemProps> = ({
 }) => {
   const getFileRecord = useGetFileRecord();
   const getSignedUrls = useGetSignedUrls();
-  console.log("1111", !!getFileRecord, !!getSignedUrls);
+  const [dataUri, setDataUri] = useFileCache2Uri(fileId, {
+    setFiles: useFileCache().setFiles,
+  }) ?? [undefined, undefined];
   const [expanded, setExpanded] = useState(false);
-  const [dataUri, setDataUri] = useState<DataUri | null | undefined>(undefined);
   const [meta, setMeta] = useState<Partial<FileMeta>>({});
   const [record, setRecord] = useState<Partial<FileRecord>>({});
   const [urls, setUrls] = useState<{
@@ -306,17 +389,10 @@ const FileItem: React.FC<FileItemProps> = ({
       setLoading(true);
       setLoadError(null);
       try {
-        const [uri, rec, urlObj] = await Promise.allSettled([
-          getDataUri(fileId),
+        const [rec, urlObj] = await Promise.allSettled([
           getFileRecord ? getFileRecord(fileId) : Promise.resolve(undefined),
           getSignedUrls ? getSignedUrls(fileId) : Promise.resolve(null),
         ]);
-
-        console.log("handleToggle1", [uri, rec, urlObj]);
-
-        if (uri.status === "fulfilled") {
-          setDataUri(uri.value ?? null);
-        }
 
         if (rec.status === "fulfilled" && rec.value) {
           const r = rec.value;
@@ -387,6 +463,7 @@ const FileItem: React.FC<FileItemProps> = ({
             onClearError={onClearError}
             onManualUpload={onManualUpload}
             onOpenGetUrl={handleOpenGetUrl}
+            setMetaUri={setDataUri}
           />
         )
       }
@@ -397,7 +474,6 @@ const FileItem: React.FC<FileItemProps> = ({
 interface ExpandableSectionProps {
   title: string;
   fileIds: FileId[] | undefined;
-  getDataUri: (id: FileId) => Promise<DataUri | null | undefined>;
   onRetryUpload: (id: FileId, uri?: DataUri) => Promise<void>;
   onRetryFetch: (id: FileId) => Promise<void>;
   onClearError?: (id: FileId) => void;
@@ -410,7 +486,6 @@ interface ExpandableSectionProps {
 const ExpandableSection: React.FC<ExpandableSectionProps> = ({
   title,
   fileIds,
-  getDataUri,
   onRetryUpload,
   onRetryFetch,
   onClearError,
@@ -432,7 +507,6 @@ const ExpandableSection: React.FC<ExpandableSectionProps> = ({
             <FileItem
               key={id}
               fileId={id}
-              getDataUri={getDataUri}
               onRetryUpload={onRetryUpload}
               onRetryFetch={onRetryFetch}
               onClearError={onClearError}
@@ -451,7 +525,6 @@ const ExpandableSection: React.FC<ExpandableSectionProps> = ({
 interface ErrorsSectionProps {
   title: string;
   errors: Record<FileId, string>;
-  getDataUri: (id: FileId) => Promise<DataUri | null | undefined>;
   onClearError?: (id: FileId) => void;
   onRetry: (id: FileId) => Promise<void>;
   onManualUpload?: (id: FileId, dataUri: DataUri) => Promise<void>;
@@ -462,7 +535,6 @@ interface ErrorsSectionProps {
 const ErrorsSection: React.FC<ErrorsSectionProps> = ({
   title,
   errors,
-  getDataUri,
   onClearError,
   onRetry,
   onManualUpload,
@@ -487,7 +559,6 @@ const ErrorsSection: React.FC<ErrorsSectionProps> = ({
             <FileItem
               key={id}
               fileId={id}
-              getDataUri={getDataUri}
               errorMessage={errors[id]}
               onClearError={onClearError}
               onRetryUpload={handleRetryError}
@@ -512,16 +583,8 @@ export const FileCacheDiagnostic: React.FC = () => {
   const [cacheErrorsExpanded, setCacheErrorsExpanded] = useState(false);
   const [uploadErrorsExpanded, setUploadErrorsExpanded] = useState(false);
 
-  const {
-    sync,
-    reset,
-    refreshNonPending,
-    getItem,
-    getFileRecord,
-    getSignedUrls,
-    uploadFile,
-  } = useFileCache();
-  console.log("getFileRecord1", getFileRecord, getSignedUrls);
+  const { sync, reset, refreshNonPending, uploadFile } = useFileCache();
+
   const clearCacheError = useClearCacheError();
   const clearUploadError = useClearUploadError();
   const cacheErrors = useCacheErrorsRecord();
@@ -531,8 +594,6 @@ export const FileCacheDiagnostic: React.FC = () => {
   const errorIds = useErrorFileIds();
   const recentIds = useRecentFileIds();
   const missingIds = useMissingFileIds();
-
-  const getDataUriForFile = getItem || (async () => null);
 
   const handleRetryUpload = async (id: FileId, uri?: DataUri) => {
     console.log("Retry upload for", id, uri);
@@ -555,22 +616,6 @@ export const FileCacheDiagnostic: React.FC = () => {
       await uploadFile(id, dataUri);
     }
   };
-
-  const signedUrlsWithNull = getSignedUrls
-    ? async (
-        id: FileId,
-      ): Promise<{
-        getUrl?: string | null | undefined;
-        putUrl?: string | null | undefined;
-      } | null> => {
-        const urls = await getSignedUrls(id);
-        if (!urls) return null;
-        return urls as {
-          getUrl?: string | null | undefined;
-          putUrl?: string | null | undefined;
-        };
-      }
-    : undefined;
 
   return (
     <View style={styles.container}>
@@ -604,7 +649,6 @@ export const FileCacheDiagnostic: React.FC = () => {
       <ExpandableSection
         title="Download Cache"
         fileIds={Array.isArray(cacheIds) ? cacheIds : []}
-        getDataUri={getDataUriForFile}
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
         onClearError={clearCacheError}
@@ -615,7 +659,6 @@ export const FileCacheDiagnostic: React.FC = () => {
       <ExpandableSection
         title="Upload Cache"
         fileIds={Array.isArray(pendingIds) ? pendingIds : []}
-        getDataUri={getDataUriForFile}
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
         onClearError={clearUploadError}
@@ -627,7 +670,6 @@ export const FileCacheDiagnostic: React.FC = () => {
       <ExpandableSection
         title="Upload Backup Cache"
         fileIds={Array.isArray(errorIds) ? errorIds : []}
-        getDataUri={getDataUriForFile}
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
         onClearError={clearUploadError}
@@ -639,7 +681,6 @@ export const FileCacheDiagnostic: React.FC = () => {
       <ExpandableSection
         title="Missing Files"
         fileIds={Array.isArray(missingIds) ? missingIds : []}
-        getDataUri={getDataUriForFile}
         onRetryUpload={async () => {}}
         onRetryFetch={handleRetryFetch}
         onClearError={undefined}
@@ -650,7 +691,6 @@ export const FileCacheDiagnostic: React.FC = () => {
       <ExpandableSection
         title="Recent Files"
         fileIds={Array.isArray(recentIds) ? recentIds : []}
-        getDataUri={getDataUriForFile}
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
         onClearError={clearCacheError}
@@ -661,7 +701,6 @@ export const FileCacheDiagnostic: React.FC = () => {
       <ErrorsSection
         title="Download Errors"
         errors={cacheErrors}
-        getDataUri={getDataUriForFile}
         onClearError={clearCacheError}
         onRetry={handleRetryError}
         onManualUpload={handleManualUpload}
@@ -671,7 +710,6 @@ export const FileCacheDiagnostic: React.FC = () => {
       <ErrorsSection
         title="Upload Errors"
         errors={uploadErrors}
-        getDataUri={getDataUriForFile}
         onClearError={clearUploadError}
         onRetry={handleRetryError}
         onManualUpload={handleManualUpload}
