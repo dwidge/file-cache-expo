@@ -46,6 +46,7 @@ import {
   getDataUriFromBufferBin,
   getMetaBufferFromDataUri,
   getSizeFromDataUri,
+  MetaNull,
 } from "./uri.js";
 import { ManagedUriStorage, useManagedUriItem } from "./useLocalUri.js";
 import { useMountTracker, useMountTrackerItem } from "./useMountTracker.js";
@@ -93,6 +94,20 @@ export type FileCache = {
    */
   useUploadErrors: () => Record<FileId, string>;
   /**
+   * Function to retrieve file record/metadata for a file ID.
+   */
+  getFileRecord?: (id: FileId) => Promise<MetaNull | null>;
+  /**
+   * Function to retrieve signed URLs for a file ID.
+   */
+  getSignedUrls?: (
+    id: FileId,
+  ) => Promise<Pick<FileRecord, "getUrl" | "putUrl"> | null>;
+  /**
+   * Function to manually upload a file by ID and data URI.
+   */
+  uploadFile?: (id: FileId, data: DataUri) => Promise<void>;
+  /**
    * Trigger a sync operation to upload pending files from cache and download speculative files to cache.
    * @param options - Optional parameters: an AbortSignal and a progress notifier.
    * @returns A promise that resolves when the sync operation is complete.
@@ -132,6 +147,9 @@ export const FileCacheContext = createContext<FileCache>({
   useMissingList: () => [],
   useCacheErrors: () => ({}),
   useUploadErrors: () => ({}),
+  getFileRecord: undefined,
+  getSignedUrls: undefined,
+  uploadFile: async () => {},
   sync: async () => {},
   reset: async () => {},
   refreshNonPending: async () => {},
@@ -173,6 +191,16 @@ export type FileCacheProviderProps = {
    * Receives the file id and should return the file’s DataUri (or null if it does not exist).
    */
   downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
+  /**
+   * Function to retrieve file record/metadata for a file ID.
+   */
+  getFileRecord?: (id: FileId) => Promise<MetaNull | null>;
+  /**
+   * Function to retrieve signed URLs for a file ID.
+   */
+  getSignedUrls?: (
+    id: FileId,
+  ) => Promise<Pick<FileRecord, "getUrl" | "putUrl"> | null>;
 
   cacheStorage?: ManagedUriStorage;
   uploadStorage?: ManagedUriStorage;
@@ -581,6 +609,8 @@ export const FileCacheProvider = ({
   getCacheableIds,
   uploadFile,
   downloadFile,
+  getFileRecord,
+  getSignedUrls,
   cacheStorage,
   uploadStorage,
   uploadErrorStorage,
@@ -1139,6 +1169,9 @@ export const FileCacheProvider = ({
       useMissingList,
       useCacheErrors,
       useUploadErrors,
+      getFileRecord,
+      getSignedUrls,
+      uploadFile,
       sync,
       reset,
       refreshNonPending,
@@ -1155,6 +1188,9 @@ export const FileCacheProvider = ({
       useMissingList,
       useCacheErrors,
       useUploadErrors,
+      getFileRecord,
+      getSignedUrls,
+      uploadFile,
       sync,
       reset,
       refreshNonPending,
@@ -1247,6 +1283,9 @@ export const useCacheErrorsRecord = (): Record<FileId, string> =>
  */
 export const useUploadErrorsRecord = (): Record<FileId, string> =>
   useFileCache().useUploadErrors();
+
+export const useGetFileRecord = () => useFileCache().getFileRecord;
+export const useGetSignedUrls = () => useFileCache().getSignedUrls;
 
 /**
  * Hook to trigger file cache synchronization.

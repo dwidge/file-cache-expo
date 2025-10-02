@@ -1,8 +1,12 @@
 import { viewUri } from "@dwidge/expo-download-uri";
+import * as Crypto from "expo-crypto";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system";
 import React, { useState } from "react";
 import {
   Alert,
   Image,
+  Linking,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -16,79 +20,251 @@ import {
   useClearUploadError,
   useErrorFileIds,
   useFileCache,
+  useGetFileRecord,
+  useGetSignedUrls,
   useMissingFileIds,
   usePendingFileIds,
   useRecentFileIds,
   useUploadErrorsRecord,
 } from "./provider";
-import { DataUri, FileId } from "./types";
+import { DataUri, FileId, FileMeta, FileRecord } from "./types";
 
 interface FileDetailsProps {
   fileId: FileId;
-  dataUri: DataUri | null;
+  dataUri?: DataUri | null;
+  meta?: Partial<FileMeta>;
+  record?: Partial<FileRecord>;
+  urls?: { getUrl?: string | null; putUrl?: string | null } | null;
   errorMessage?: string;
   onRetryUpload: (id: FileId, uri?: DataUri) => Promise<void>;
   onRetryFetch: (id: FileId) => Promise<void>;
   onClearError?: (id: FileId) => void;
+  onManualUpload?: (id: FileId, dataUri: DataUri) => Promise<void>;
+  onOpenGetUrl?: (url: string) => void;
 }
 
 const FileDetailsInline: React.FC<FileDetailsProps> = ({
   fileId,
   dataUri,
+  meta = { size: null, mime: null, sha256: null },
+  record,
+  urls = { getUrl: null, putUrl: null },
   errorMessage,
   onRetryUpload,
   onRetryFetch,
   onClearError,
-}) => (
-  <View style={styles.fileDetails}>
-    <Text style={styles.detailsTitle}>File Details: {fileId}</Text>
-    <Text>File ID: {fileId}</Text>
-    {errorMessage && (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Error: {errorMessage}</Text>
-        {onClearError ? (
-          <TouchableOpacity
-            style={styles.clearButton}
-            onPress={() => onClearError(fileId)}
-          >
-            <Text>Clear Error</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-    )}
-    {dataUri && (
-      <>
-        <Text>Data URI Length: {dataUri.length}</Text>
-        {dataUri.startsWith("data:image/") && (
-          <Image
-            source={{ uri: dataUri }}
-            style={{ width: 200, height: 200, marginVertical: 10 }}
-          />
-        )}
+  onManualUpload,
+  onOpenGetUrl,
+}) => {
+  const handleOpenGetUrl = () => {
+    if (urls?.getUrl && urls.getUrl !== null) {
+      onOpenGetUrl?.(urls.getUrl);
+    }
+  };
+
+  const handleManualUploadClick = async () => {
+    if (
+      !onManualUpload ||
+      !urls?.putUrl ||
+      urls.putUrl === null ||
+      meta.size == null ||
+      meta.sha256 == null ||
+      meta.mime == null
+    ) {
+      Alert.alert(
+        "Upload not available",
+        "Manual upload requires putUrl and complete meta data.",
+      );
+      return;
+    }
+
+    if (meta.size == null || meta.sha256 == null || meta.mime == null) {
+      Alert.alert("Invalid meta", "Meta data is incomplete.");
+      return;
+    }
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: meta.mime,
+        copyToCacheDirectory: false,
+      });
+
+      const item = result.output?.item[0];
+      if (!item) return;
+
+      const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
+
+      let force = false;
+      if (pickedSize !== meta.size) {
+        const alertResult = await new Promise<{ action: string }>((resolve) => {
+          Alert.alert(
+            "Size Mismatch",
+            `Expected size: ${meta.size}, Picked: ${pickedSize}. Proceed anyway?`,
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Force Upload",
+                onPress: () => resolve({ action: "force" }),
+              },
+            ],
+          );
+        });
+        const { action } = alertResult;
+        if (action !== "force") return;
+        force = true;
+      }
+
+      const fileContent = await FileSystem.readAsStringAsync(fileUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const computedHash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        fileContent,
+        { encoding: Crypto.CryptoEncoding.BASE64 },
+      );
+
+      if (computedHash !== meta.sha256 && !force) {
+        const alertResult = await new Promise<{ action: string }>((resolve) => {
+          Alert.alert(
+            "Hash Mismatch",
+            `Expected SHA256: ${meta.sha256}, Computed: ${computedHash}. Proceed anyway?`,
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Force Upload",
+                onPress: () => resolve({ action: "force" }),
+              },
+            ],
+          );
+        });
+        const { action } = alertResult;
+        if (action !== "force") return;
+        force = true;
+      }
+
+      if (pickedMime !== meta.mime && !force) {
+        const alertResult = await new Promise<{ action: string }>((resolve) => {
+          Alert.alert(
+            "MIME Mismatch",
+            `Expected MIME: ${meta.mime}, Picked: ${pickedMime}. Proceed anyway?`,
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Force Upload",
+                onPress: () => resolve({ action: "force" }),
+              },
+            ],
+          );
+        });
+        const { action } = alertResult;
+        if (action !== "force") return;
+      }
+
+      const dataUri =
+        `data:${pickedMime || meta.mime};base64,${fileContent}` as DataUri;
+
+      await onManualUpload(fileId, dataUri);
+      Alert.alert("Upload", "File uploaded successfully.");
+    } catch (error) {
+      console.error("Upload error:", error);
+      Alert.alert("Upload Error", `Failed to upload: ${error}`);
+    }
+  };
+
+  const isGetUrlDisabled = !(urls?.getUrl && urls.getUrl !== null);
+  const isPutUrlDisabled =
+    !urls?.putUrl ||
+    urls.putUrl === null ||
+    meta.size == null ||
+    meta.sha256 == null ||
+    meta.mime == null ||
+    !onManualUpload;
+
+  return (
+    <View style={styles.fileDetails}>
+      <Text style={styles.detailsTitle}>File Details: {fileId}</Text>
+      <Text>File ID: {fileId}</Text>
+      {record && (
+        <View style={styles.metaContainer}>
+          <Text style={styles.metaTitle}>Record Meta:</Text>
+          <Text>Size: {record.size ?? "N/A"}</Text>
+          <Text>MIME: {record.mime ?? "N/A"}</Text>
+          <Text>
+            SHA256:{" "}
+            {record.sha256 ? `${record.sha256.substring(0, 16)}...` : "N/A"}
+          </Text>
+          {record.updatedAt && (
+            <Text>Updated: {new Date(record.updatedAt).toISOString()}</Text>
+          )}
+        </View>
+      )}
+      {errorMessage && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Error: {errorMessage}</Text>
+          {onClearError ? (
+            <TouchableOpacity
+              style={styles.clearButton}
+              onPress={() => onClearError(fileId)}
+            >
+              <Text>Clear Error</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      )}
+      <Text>
+        Data URI: {dataUri ? `${dataUri.length} chars` : "No data cached"}
+      </Text>
+      {dataUri && dataUri.startsWith("data:image/") && (
+        <Image
+          source={{ uri: dataUri }}
+          style={{ width: 200, height: 200, marginVertical: 10 }}
+        />
+      )}
+      <TouchableOpacity
+        style={[styles.button, isGetUrlDisabled && styles.disabledButton]}
+        onPress={handleOpenGetUrl}
+        disabled={isGetUrlDisabled}
+      >
+        <Text
+          style={[styles.buttonText, isGetUrlDisabled && styles.disabledText]}
+        >
+          {isGetUrlDisabled ? "No Get URL" : "Open Get URL"}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.button, isPutUrlDisabled && styles.disabledButton]}
+        onPress={handleManualUploadClick}
+        disabled={isPutUrlDisabled}
+      >
+        <Text
+          style={[styles.buttonText, isPutUrlDisabled && styles.disabledText]}
+        >
+          {isPutUrlDisabled ? "No Put URL or Meta" : "Upload New File"}
+        </Text>
+      </TouchableOpacity>
+      {dataUri && (
         <TouchableOpacity
           style={styles.button}
           onPress={() => viewUri(dataUri, fileId)}
         >
-          <Text>Download/View File</Text>
+          <Text style={styles.buttonText}>Download/View Cached File</Text>
         </TouchableOpacity>
-      </>
-    )}
-    {dataUri && (
+      )}
       <TouchableOpacity
         style={styles.button}
-        onPress={() => onRetryUpload(fileId, dataUri)}
+        onPress={() => onRetryUpload(fileId, dataUri ?? undefined)}
       >
-        <Text>Retry Upload</Text>
+        <Text style={styles.buttonText}>Retry Upload</Text>
       </TouchableOpacity>
-    )}
-    <TouchableOpacity
-      style={styles.button}
-      onPress={() => onRetryFetch(fileId)}
-    >
-      <Text>Retry Fetch</Text>
-    </TouchableOpacity>
-  </View>
-);
+      <TouchableOpacity
+        style={styles.button}
+        onPress={() => onRetryFetch(fileId)}
+      >
+        <Text style={styles.buttonText}>Retry Fetch</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 interface FileItemProps {
   fileId: FileId;
@@ -97,6 +273,7 @@ interface FileItemProps {
   onRetryUpload: (id: FileId, uri?: DataUri) => Promise<void>;
   onRetryFetch: (id: FileId) => Promise<void>;
   onClearError?: (id: FileId) => void;
+  onManualUpload?: (id: FileId, dataUri: DataUri) => Promise<void>;
   showRetry?: boolean;
 }
 
@@ -107,20 +284,64 @@ const FileItem: React.FC<FileItemProps> = ({
   onRetryUpload,
   onRetryFetch,
   onClearError,
+  onManualUpload,
   showRetry = false,
 }) => {
+  const getFileRecord = useGetFileRecord();
+  const getSignedUrls = useGetSignedUrls();
+  console.log("1111", !!getFileRecord, !!getSignedUrls);
   const [expanded, setExpanded] = useState(false);
-  const [dataUri, setDataUri] = useState<DataUri | null>(null);
+  const [dataUri, setDataUri] = useState<DataUri | null | undefined>(undefined);
+  const [meta, setMeta] = useState<Partial<FileMeta>>({});
+  const [record, setRecord] = useState<Partial<FileRecord>>({});
+  const [urls, setUrls] = useState<{
+    getUrl?: string | null;
+    putUrl?: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const handleToggle = async () => {
-    if (!expanded && !dataUri) {
+    if (!expanded) {
       setLoading(true);
+      setLoadError(null);
       try {
-        const uri = await getDataUri(fileId);
-        setDataUri((uri ?? null) as DataUri | null);
+        const [uri, rec, urlObj] = await Promise.allSettled([
+          getDataUri(fileId),
+          getFileRecord ? getFileRecord(fileId) : Promise.resolve(undefined),
+          getSignedUrls ? getSignedUrls(fileId) : Promise.resolve(null),
+        ]);
+
+        console.log("handleToggle1", [uri, rec, urlObj]);
+
+        if (uri.status === "fulfilled") {
+          setDataUri(uri.value ?? null);
+        }
+
+        if (rec.status === "fulfilled" && rec.value) {
+          const r = rec.value;
+          setRecord(r);
+          setMeta({
+            size: r.size ?? undefined,
+            mime: r.mime ?? undefined,
+            sha256: r.sha256 ?? undefined,
+          });
+        }
+
+        if (urlObj.status === "fulfilled") {
+          const urlValue = urlObj.value;
+          if (urlValue) {
+            setUrls({
+              getUrl: urlValue.getUrl ?? null,
+              putUrl: urlValue.putUrl ?? null,
+            });
+          } else {
+            setUrls(null);
+          }
+        }
       } catch (error) {
-        console.error("Error loading file URI:", error);
+        console.error("Error loading file details:", error);
+        setLoadError(`${error}`);
       } finally {
         setLoading(false);
       }
@@ -128,67 +349,46 @@ const FileItem: React.FC<FileItemProps> = ({
     setExpanded(!expanded);
   };
 
+  const handleOpenGetUrl = (url: string) => {
+    Linking.openURL(url).catch(console.error);
+  };
+
+  if (loading && !expanded) {
+    return (
+      <Expandable
+        title={fileId}
+        expanded={false}
+        onToggle={() => {}}
+        children={<Text>Loading summary...</Text>}
+      />
+    );
+  }
+
   return (
     <Expandable
-      title={fileId}
+      title={`${fileId} ${errorMessage ? `(Error: ${errorMessage.substring(0, 30)}...)` : ""}`}
       expanded={expanded}
       onToggle={handleToggle}
       children={
         loading ? (
-          <Text>Loading...</Text>
+          <Text>Loading details...</Text>
+        ) : loadError ? (
+          <Text>Error loading details: {loadError}</Text>
         ) : (
           <FileDetailsInline
             fileId={fileId}
-            dataUri={dataUri}
+            dataUri={dataUri ?? undefined}
+            meta={meta}
+            record={record}
+            urls={urls}
             errorMessage={errorMessage}
             onRetryUpload={onRetryUpload}
             onRetryFetch={onRetryFetch}
             onClearError={onClearError}
+            onManualUpload={onManualUpload}
+            onOpenGetUrl={handleOpenGetUrl}
           />
         )
-      }
-    />
-  );
-};
-
-interface ErrorItemProps {
-  fileId: FileId;
-  errorMessage: string;
-  onClearError?: (id: FileId) => void;
-  onRetry: (id: FileId) => Promise<void>;
-}
-
-const ErrorItem: React.FC<ErrorItemProps> = ({
-  fileId,
-  errorMessage,
-  onClearError,
-  onRetry,
-}) => {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <Expandable
-      title={`${fileId}: ${errorMessage.substring(0, 50)}${errorMessage.length > 50 ? "..." : ""}`}
-      expanded={expanded}
-      onToggle={() => setExpanded(!expanded)}
-      children={
-        <View style={styles.errorDetails}>
-          <Text style={styles.errorText}>Full Error: {errorMessage}</Text>
-          {onClearError ? (
-            <TouchableOpacity
-              style={styles.clearButton}
-              onPress={() => onClearError(fileId)}
-            >
-              <Text>Clear Error</Text>
-            </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={() => onRetry(fileId)}
-          >
-            <Text>Retry Operation</Text>
-          </TouchableOpacity>
-        </View>
       }
     />
   );
@@ -201,6 +401,7 @@ interface ExpandableSectionProps {
   onRetryUpload: (id: FileId, uri?: DataUri) => Promise<void>;
   onRetryFetch: (id: FileId) => Promise<void>;
   onClearError?: (id: FileId) => void;
+  onManualUpload?: (id: FileId, dataUri: DataUri) => Promise<void>;
   showRetry?: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -213,6 +414,7 @@ const ExpandableSection: React.FC<ExpandableSectionProps> = ({
   onRetryUpload,
   onRetryFetch,
   onClearError,
+  onManualUpload,
   showRetry = false,
   expanded,
   onToggle,
@@ -234,6 +436,7 @@ const ExpandableSection: React.FC<ExpandableSectionProps> = ({
               onRetryUpload={onRetryUpload}
               onRetryFetch={onRetryFetch}
               onClearError={onClearError}
+              onManualUpload={onManualUpload}
               showRetry={showRetry}
             />
           ))
@@ -248,8 +451,10 @@ const ExpandableSection: React.FC<ExpandableSectionProps> = ({
 interface ErrorsSectionProps {
   title: string;
   errors: Record<FileId, string>;
+  getDataUri: (id: FileId) => Promise<DataUri | null | undefined>;
   onClearError?: (id: FileId) => void;
   onRetry: (id: FileId) => Promise<void>;
+  onManualUpload?: (id: FileId, dataUri: DataUri) => Promise<void>;
   expanded: boolean;
   onToggle: () => void;
 }
@@ -257,13 +462,19 @@ interface ErrorsSectionProps {
 const ErrorsSection: React.FC<ErrorsSectionProps> = ({
   title,
   errors,
+  getDataUri,
   onClearError,
   onRetry,
+  onManualUpload,
   expanded,
   onToggle,
 }) => {
   const errorIds = Object.keys(errors);
   const count = errorIds.length;
+
+  const handleRetryError = async (id: FileId) => {
+    await onRetry(id);
+  };
 
   return (
     <Expandable
@@ -273,12 +484,15 @@ const ErrorsSection: React.FC<ErrorsSectionProps> = ({
       children={
         errorIds.length > 0 ? (
           errorIds.map((id) => (
-            <ErrorItem
+            <FileItem
               key={id}
               fileId={id}
+              getDataUri={getDataUri}
               errorMessage={errors[id]}
               onClearError={onClearError}
-              onRetry={onRetry}
+              onRetryUpload={handleRetryError}
+              onRetryFetch={handleRetryError}
+              onManualUpload={onManualUpload}
             />
           ))
         ) : (
@@ -298,7 +512,16 @@ export const FileCacheDiagnostic: React.FC = () => {
   const [cacheErrorsExpanded, setCacheErrorsExpanded] = useState(false);
   const [uploadErrorsExpanded, setUploadErrorsExpanded] = useState(false);
 
-  const { sync, reset, refreshNonPending, getItem } = useFileCache();
+  const {
+    sync,
+    reset,
+    refreshNonPending,
+    getItem,
+    getFileRecord,
+    getSignedUrls,
+    uploadFile,
+  } = useFileCache();
+  console.log("getFileRecord1", getFileRecord, getSignedUrls);
   const clearCacheError = useClearCacheError();
   const clearUploadError = useClearUploadError();
   const cacheErrors = useCacheErrorsRecord();
@@ -308,6 +531,8 @@ export const FileCacheDiagnostic: React.FC = () => {
   const errorIds = useErrorFileIds();
   const recentIds = useRecentFileIds();
   const missingIds = useMissingFileIds();
+
+  const getDataUriForFile = getItem || (async () => null);
 
   const handleRetryUpload = async (id: FileId, uri?: DataUri) => {
     console.log("Retry upload for", id, uri);
@@ -325,9 +550,27 @@ export const FileCacheDiagnostic: React.FC = () => {
     await refreshNonPending?.([id]);
   };
 
-  const handleDownload = async (uri: DataUri, id: string) => viewUri(uri, id);
+  const handleManualUpload = async (id: FileId, dataUri: DataUri) => {
+    if (uploadFile) {
+      await uploadFile(id, dataUri);
+    }
+  };
 
-  const getDataUriForFile = getItem || (async () => null);
+  const signedUrlsWithNull = getSignedUrls
+    ? async (
+        id: FileId,
+      ): Promise<{
+        getUrl?: string | null | undefined;
+        putUrl?: string | null | undefined;
+      } | null> => {
+        const urls = await getSignedUrls(id);
+        if (!urls) return null;
+        return urls as {
+          getUrl?: string | null | undefined;
+          putUrl?: string | null | undefined;
+        };
+      }
+    : undefined;
 
   return (
     <View style={styles.container}>
@@ -365,6 +608,7 @@ export const FileCacheDiagnostic: React.FC = () => {
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
         onClearError={clearCacheError}
+        onManualUpload={handleManualUpload}
         expanded={cacheExpanded}
         onToggle={() => setCacheExpanded(!cacheExpanded)}
       />
@@ -375,6 +619,7 @@ export const FileCacheDiagnostic: React.FC = () => {
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
         onClearError={clearUploadError}
+        onManualUpload={handleManualUpload}
         showRetry={true}
         expanded={pendingExpanded}
         onToggle={() => setPendingExpanded(!pendingExpanded)}
@@ -386,6 +631,7 @@ export const FileCacheDiagnostic: React.FC = () => {
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
         onClearError={clearUploadError}
+        onManualUpload={handleManualUpload}
         showRetry={true}
         expanded={errorExpanded}
         onToggle={() => setErrorExpanded(!errorExpanded)}
@@ -397,6 +643,7 @@ export const FileCacheDiagnostic: React.FC = () => {
         onRetryUpload={async () => {}}
         onRetryFetch={handleRetryFetch}
         onClearError={undefined}
+        onManualUpload={handleManualUpload}
         expanded={missingExpanded}
         onToggle={() => setMissingExpanded(!missingExpanded)}
       />
@@ -407,22 +654,27 @@ export const FileCacheDiagnostic: React.FC = () => {
         onRetryUpload={handleRetryUpload}
         onRetryFetch={handleRetryFetch}
         onClearError={clearCacheError}
+        onManualUpload={handleManualUpload}
         expanded={recentExpanded}
         onToggle={() => setRecentExpanded(!recentExpanded)}
       />
       <ErrorsSection
         title="Download Errors"
         errors={cacheErrors}
+        getDataUri={getDataUriForFile}
         onClearError={clearCacheError}
         onRetry={handleRetryError}
+        onManualUpload={handleManualUpload}
         expanded={cacheErrorsExpanded}
         onToggle={() => setCacheErrorsExpanded(!cacheErrorsExpanded)}
       />
       <ErrorsSection
         title="Upload Errors"
         errors={uploadErrors}
+        getDataUri={getDataUriForFile}
         onClearError={clearUploadError}
         onRetry={handleRetryError}
+        onManualUpload={handleManualUpload}
         expanded={uploadErrorsExpanded}
         onToggle={() => setUploadErrorsExpanded(!uploadErrorsExpanded)}
       />
@@ -464,6 +716,18 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginBottom: 10,
   },
+  metaContainer: {
+    backgroundColor: "#e8f5e8",
+    padding: 10,
+    marginVertical: 5,
+    borderRadius: 5,
+    borderColor: "#4caf50",
+    borderWidth: 1,
+  },
+  metaTitle: {
+    fontWeight: "bold",
+    marginBottom: 5,
+  },
   errorContainer: {
     backgroundColor: "#ffebee",
     padding: 10,
@@ -484,6 +748,13 @@ const styles = StyleSheet.create({
     borderColor: "#454545ff",
     borderWidth: 1,
   },
+  disabledButton: {
+    backgroundColor: "#ccc",
+    opacity: 0.5,
+  },
+  disabledText: {
+    color: "#999",
+  },
   clearButton: {
     backgroundColor: "#fff3e0",
     padding: 8,
@@ -491,16 +762,5 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     borderColor: "#ff9800",
     borderWidth: 1,
-  },
-  retryButton: {
-    backgroundColor: "#e3f2fd",
-    padding: 8,
-    marginVertical: 3,
-    borderRadius: 5,
-    borderColor: "#2196f3",
-    borderWidth: 1,
-  },
-  errorDetails: {
-    padding: 10,
   },
 });

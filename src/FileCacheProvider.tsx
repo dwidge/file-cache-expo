@@ -10,7 +10,7 @@ import {
   useUploadFileId,
 } from "./provider";
 import { DataUri, Disabled, FileId, FileRecord } from "./types";
-import { getMetaBufferFromDataUri } from "./uri";
+import { getMetaBufferFromDataUri, MetaNull } from "./uri";
 import { useManagedUriStorage } from "./useLocalUri";
 import { usePlatformLocalStorage } from "./usePlatformLocalStorage";
 
@@ -28,6 +28,29 @@ const useGetUrls = (getFiles?: ApiGetList<FileRecord>) =>
         return (
           (await getFiles(filter, { columns: ["getUrl", "putUrl"] }))?.[0] ??
           null
+        );
+      }
+    : undefined;
+
+const useGetUrlsById = (getFiles?: ApiGetList<FileRecord>) =>
+  getFiles
+    ? async (
+        id: FileId,
+      ): Promise<Pick<FileRecord, "putUrl" | "getUrl"> | null> => {
+        return (
+          (await getFiles({ id }, { columns: ["getUrl", "putUrl"] }))?.[0] ??
+          null
+        );
+      }
+    : undefined;
+
+const useGetMeta = (getFiles?: ApiGetList<FileRecord>) =>
+  getFiles
+    ? async (id: string): Promise<MetaNull | null> => {
+        return (
+          (
+            await getFiles({ id }, { columns: ["mime", "size", "sha256"] })
+          )?.[0] ?? null
         );
       }
     : undefined;
@@ -92,6 +115,8 @@ export const FileCacheProvider2 = ({
       uploadErrorStorage={useManagedUriStorage(
         usePlatformLocalStorage(uploadErrorCachePath),
       )}
+      getFileRecord={useGetMeta(getFiles)}
+      getSignedUrls={useGetUrlsById(getFiles)}
     >
       {children}
     </FileCacheProvider>
