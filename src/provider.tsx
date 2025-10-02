@@ -107,6 +107,8 @@ export type FileCache = {
     id: FileId,
   ) => Promise<Pick<FileRecord, "getUrl" | "putUrl"> | null>;
 
+  pickFileUri?: () => Promise<string[]>;
+
   setFiles?: ApiSetList<FileRecord, { id: string }>;
   /**
    * Function to manually upload a file by ID and data URI.
@@ -206,6 +208,8 @@ export type FileCacheProviderProps = {
   getSignedUrls?: (
     id: FileId,
   ) => Promise<Pick<FileRecord, "getUrl" | "putUrl"> | null>;
+
+  pickFileUri?: () => Promise<string[]>;
 
   setFiles?: ApiSetList<FileRecord, { id: string }>;
 
@@ -618,6 +622,7 @@ export const FileCacheProvider = ({
   downloadFile,
   getFileRecord,
   getSignedUrls,
+  pickFileUri,
   setFiles,
   cacheStorage,
   uploadStorage,
@@ -1239,6 +1244,7 @@ export const FileCacheProvider = ({
       useUploadErrors,
       getFileRecord,
       getSignedUrls,
+      pickFileUri,
       setFiles,
       uploadFile,
       sync,
@@ -1259,6 +1265,7 @@ export const FileCacheProvider = ({
       useUploadErrors,
       getFileRecord,
       getSignedUrls,
+      pickFileUri,
       setFiles,
       uploadFile,
       sync,

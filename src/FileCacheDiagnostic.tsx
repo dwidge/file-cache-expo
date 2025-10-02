@@ -1,7 +1,4 @@
 import { viewUri } from "@dwidge/expo-download-uri";
-import * as Crypto from "expo-crypto";
-import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
 import React, { useState } from "react";
 import {
   Image,
@@ -12,7 +9,8 @@ import {
   View,
 } from "react-native";
 import { Expandable } from "./Expandable";
-import { useFileCache2Uri } from "./FileCacheProvider";
+import { useFileCache2Uri, usePickFileUri } from "./FileCacheProvider";
+import { getDataUriFromFileUri } from "./getDataUriFromFileUri";
 import {
   useCacheErrorsRecord,
   useCacheFileIds,
@@ -28,6 +26,12 @@ import {
   useUploadErrorsRecord,
 } from "./provider";
 import { DataUri, FileId, FileMeta, FileRecord } from "./types";
+import {
+  asFileUri,
+  getMimeTypeFromDataUri,
+  getSha256HexFromDataUri,
+  getSizeFromDataUri,
+} from "./uri";
 import { UserError } from "./UserError.js";
 
 interface FileDetailsProps {
@@ -59,6 +63,7 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
   onOpenGetUrl,
   setMetaUri,
 }) => {
+  const pickFileUri = usePickFileUri();
   const handleOpenGetUrl = () => {
     if (urls?.getUrl && urls.getUrl !== null) {
       onOpenGetUrl?.(urls.getUrl);
@@ -67,6 +72,7 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
 
   const handleRetryPickClick = async () => {
     if (
+      !pickFileUri ||
       !onManualUpload ||
       !urls?.putUrl ||
       urls.putUrl === null ||
@@ -81,32 +87,19 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
       throw new UserError("Invalid meta");
     }
 
-    const result = await DocumentPicker.getDocumentAsync({
-      type: meta.mime,
-      copyToCacheDirectory: false,
-    });
+    const [uri] = await pickFileUri();
+    if (!uri) return;
+    const dataUri: DataUri = await getDataUriFromFileUri(asFileUri(uri));
 
-    if (!result.output) return;
-
-    const item = result.output.item[0];
-    if (!item) return;
-
-    const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
+    const pickedSize = getSizeFromDataUri(dataUri);
+    const pickedMime = getMimeTypeFromDataUri(dataUri);
+    const computedHash = await getSha256HexFromDataUri(dataUri);
 
     if (pickedSize !== meta.size) {
       throw new UserError(
         `Size Mismatch: Expected size: ${meta.size}, Picked: ${pickedSize}. File does not match.`,
       );
     }
-
-    const fileContent = await FileSystem.readAsStringAsync(fileUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    const computedHash = await Crypto.digestStringAsync(
-      Crypto.CryptoDigestAlgorithm.SHA256,
-      fileContent,
-      { encoding: Crypto.CryptoEncoding.BASE64 },
-    );
 
     if (computedHash !== meta.sha256) {
       throw new UserError(
@@ -120,40 +113,17 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
       );
     }
 
-    const dataUri =
-      `data:${pickedMime || meta.mime};base64,${fileContent}` as DataUri;
-
     await onManualUpload(fileId, dataUri);
   };
 
-  const handleChangeFileClick = setMetaUri
-    ? async () => {
-        const result = await DocumentPicker.getDocumentAsync({
-          copyToCacheDirectory: false,
-        });
-
-        if (!result.output) return;
-
-        const item = result.output.item[0];
-        if (!item) return;
-
-        const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
-
-        const fileContent = await FileSystem.readAsStringAsync(fileUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        const computedHash = await Crypto.digestStringAsync(
-          Crypto.CryptoDigestAlgorithm.SHA256,
-          fileContent,
-          { encoding: Crypto.CryptoEncoding.BASE64 },
-        );
-
-        const newDataUri =
-          `data:${pickedMime};base64,${fileContent}` as DataUri;
-
-        await setMetaUri(newDataUri);
-      }
-    : undefined;
+  const handleChangeFileClick =
+    setMetaUri && pickFileUri
+      ? async () => {
+          const [uri] = await pickFileUri();
+          if (uri)
+            await setMetaUri(await getDataUriFromFileUri(asFileUri(uri)));
+        }
+      : undefined;
 
   const handleDeleteClick = setMetaUri
     ? async () => {
@@ -163,13 +133,14 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
 
   const isGetUrlDisabled = !(urls?.getUrl && urls.getUrl !== null);
   const isPutUrlDisabled =
+    !pickFileUri ||
     !urls?.putUrl ||
     urls.putUrl === null ||
     meta.size == null ||
     meta.sha256 == null ||
     meta.mime == null ||
     !onManualUpload;
-  const isChangeDisabled = !setMetaUri;
+  const isChangeDisabled = !setMetaUri || !pickFileUri;
   const isDeleteDisabled = !setMetaUri;
 
   return (
@@ -220,7 +191,7 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
         <Text
           style={[styles.buttonText, isGetUrlDisabled && styles.disabledText]}
         >
-          {isGetUrlDisabled ? "No Get URL" : "Open Get URL"}
+          Open Get URL
         </Text>
       </TouchableOpacity>
       <TouchableOpacity
@@ -231,7 +202,7 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
         <Text
           style={[styles.buttonText, isPutUrlDisabled && styles.disabledText]}
         >
-          {isPutUrlDisabled ? "No Put URL or Meta" : "Retry Pick Matching File"}
+          Pick Matching File
         </Text>
       </TouchableOpacity>
       <TouchableOpacity
@@ -242,9 +213,7 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
         <Text
           style={[styles.buttonText, isChangeDisabled && styles.disabledText]}
         >
-          {isChangeDisabled
-            ? "No Change Available"
-            : "Change File (update meta)"}
+          Change File (update meta)
         </Text>
       </TouchableOpacity>
       <TouchableOpacity
@@ -255,7 +224,7 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
         <Text
           style={[styles.buttonText, isDeleteDisabled && styles.disabledText]}
         >
-          {isDeleteDisabled ? "No Delete Available" : "Delete File (null meta)"}
+          Delete File (null meta)
         </Text>
       </TouchableOpacity>
       {dataUri && (

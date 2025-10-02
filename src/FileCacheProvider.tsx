@@ -72,6 +72,7 @@ const useGetCacheableIds = (getFiles?: ApiGetList<FileRecord>) =>
 
 export const FileCacheProvider2 = ({
   children,
+  pickFileUri,
   maxCache,
   maxRecent,
   maxUploadCache,
@@ -85,6 +86,7 @@ export const FileCacheProvider2 = ({
   getFiles,
   setFiles,
 }: PropsWithChildren<{
+  pickFileUri?: () => Promise<string[]>;
   maxCache: number;
   maxRecent: number;
   maxUploadCache?: number;
@@ -100,6 +102,7 @@ export const FileCacheProvider2 = ({
 }>) => {
   return (
     <FileCacheProvider
+      pickFileUri={pickFileUri}
       maxCache={maxCache}
       maxUploadCache={maxUploadCache}
       maxUploadErrorCache={maxUploadErrorCache}
@@ -151,5 +154,7 @@ export const useFileCache2Uri = (
       : undefined;
   return [uri, setMetaUri];
 };
+
+export const usePickFileUri = () => useFileCache().pickFileUri;
 
 export const useGetFileCache2Uri = () => useFileCache().getItem;
