@@ -37,6 +37,7 @@ import { UserError } from "./UserError.js";
 interface FileDetailsProps {
   fileId: FileId;
   dataUri?: DataUri | null;
+  setDataUri?: (uri: DataUri | null) => Promise<DataUri | null>;
   meta?: Partial<FileMeta>;
   record?: Partial<FileRecord>;
   urls?: { getUrl?: string | null; putUrl?: string | null } | null;
@@ -46,12 +47,12 @@ interface FileDetailsProps {
   onClearError?: (id: FileId) => void;
   onManualUpload?: (id: FileId, dataUri: DataUri) => Promise<void>;
   onOpenGetUrl?: (url: string) => void;
-  setMetaUri?: ((uri: DataUri | null) => Promise<DataUri | null>) | undefined;
 }
 
 const FileDetailsInline: React.FC<FileDetailsProps> = ({
   fileId,
   dataUri,
+  setDataUri,
   meta = { size: null, mime: null, sha256: null },
   record,
   urls = { getUrl: null, putUrl: null },
@@ -61,7 +62,6 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
   onClearError,
   onManualUpload,
   onOpenGetUrl,
-  setMetaUri,
 }) => {
   const pickFileUri = usePickFileUri();
   const handleOpenGetUrl = () => {
@@ -117,17 +117,17 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
   };
 
   const handleChangeFileClick =
-    setMetaUri && pickFileUri
+    setDataUri && pickFileUri
       ? async () => {
           const [uri] = await pickFileUri();
           if (uri)
-            await setMetaUri(await getDataUriFromFileUri(asFileUri(uri)));
+            await setDataUri(await getDataUriFromFileUri(asFileUri(uri)));
         }
       : undefined;
 
-  const handleDeleteClick = setMetaUri
+  const handleDeleteClick = setDataUri
     ? async () => {
-        await setMetaUri(null);
+        await setDataUri(null);
       }
     : undefined;
 
@@ -140,8 +140,8 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
     meta.sha256 == null ||
     meta.mime == null ||
     !onManualUpload;
-  const isChangeDisabled = !setMetaUri || !pickFileUri;
-  const isDeleteDisabled = !setMetaUri;
+  const isChangeDisabled = !setDataUri || !pickFileUri;
+  const isDeleteDisabled = !setDataUri;
 
   return (
     <View style={styles.fileDetails}>
@@ -354,7 +354,8 @@ const FileItem: React.FC<FileItemProps> = ({
         ) : (
           <FileDetailsInline
             fileId={fileId}
-            dataUri={dataUri ?? undefined}
+            dataUri={dataUri}
+            setDataUri={setDataUri}
             meta={meta}
             record={record}
             urls={urls}
@@ -364,7 +365,6 @@ const FileItem: React.FC<FileItemProps> = ({
             onClearError={onClearError}
             onManualUpload={onManualUpload}
             onOpenGetUrl={handleOpenGetUrl}
-            setMetaUri={setDataUri}
           />
         )
       }
