@@ -117,6 +117,7 @@ export const FileCacheProvider2 = ({
       )}
       getFileRecord={useGetMeta(getFilesLocal)}
       getSignedUrls={useGetUrlsById(getFiles)}
+      setFiles={setFiles}
     >
       {children}
     </FileCacheProvider>

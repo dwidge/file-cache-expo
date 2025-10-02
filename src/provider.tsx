@@ -6,7 +6,7 @@
  * and refreshing the cache from the remote source.
  */
 
-import { useLocal } from "@dwidge/crud-api-react";
+import { ApiSetList, useLocal } from "@dwidge/crud-api-react";
 import {
   AsyncDispatch,
   AsyncState,
@@ -106,6 +106,8 @@ export type FileCache = {
   getSignedUrls?: (
     id: FileId,
   ) => Promise<Pick<FileRecord, "getUrl" | "putUrl"> | null>;
+
+  setFiles?: ApiSetList<FileRecord, { id: string }>;
   /**
    * Function to manually upload a file by ID and data URI.
    */
@@ -204,6 +206,8 @@ export type FileCacheProviderProps = {
   getSignedUrls?: (
     id: FileId,
   ) => Promise<Pick<FileRecord, "getUrl" | "putUrl"> | null>;
+
+  setFiles?: ApiSetList<FileRecord, { id: string }>;
 
   cacheStorage?: ManagedUriStorage;
   uploadStorage?: ManagedUriStorage;
@@ -614,6 +618,7 @@ export const FileCacheProvider = ({
   downloadFile,
   getFileRecord,
   getSignedUrls,
+  setFiles,
   cacheStorage,
   uploadStorage,
   uploadErrorStorage,
@@ -1234,6 +1239,7 @@ export const FileCacheProvider = ({
       useUploadErrors,
       getFileRecord,
       getSignedUrls,
+      setFiles,
       uploadFile,
       sync,
       reset,
@@ -1253,6 +1259,7 @@ export const FileCacheProvider = ({
       useUploadErrors,
       getFileRecord,
       getSignedUrls,
+      setFiles,
       uploadFile,
       sync,
       reset,
