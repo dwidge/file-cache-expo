@@ -16,6 +16,7 @@ import {
   useClearUploadError,
   useErrorFileIds,
   useFileCache,
+  useMissingFileIds,
   usePendingFileIds,
   useRecentFileIds,
   useUploadErrorsRecord,
@@ -293,6 +294,7 @@ export const FileCacheDiagnostic: React.FC = () => {
   const [pendingExpanded, setPendingExpanded] = useState(false);
   const [errorExpanded, setErrorExpanded] = useState(false);
   const [recentExpanded, setRecentExpanded] = useState(false);
+  const [missingExpanded, setMissingExpanded] = useState(false);
   const [cacheErrorsExpanded, setCacheErrorsExpanded] = useState(false);
   const [uploadErrorsExpanded, setUploadErrorsExpanded] = useState(false);
 
@@ -305,6 +307,7 @@ export const FileCacheDiagnostic: React.FC = () => {
   const pendingIds = usePendingFileIds();
   const errorIds = useErrorFileIds();
   const recentIds = useRecentFileIds();
+  const missingIds = useMissingFileIds();
 
   const handleRetryUpload = async (id: FileId, uri?: DataUri) => {
     console.log("Retry upload for", id, uri);
@@ -386,6 +389,16 @@ export const FileCacheDiagnostic: React.FC = () => {
         showRetry={true}
         expanded={errorExpanded}
         onToggle={() => setErrorExpanded(!errorExpanded)}
+      />
+      <ExpandableSection
+        title="Missing Files"
+        fileIds={Array.isArray(missingIds) ? missingIds : []}
+        getDataUri={getDataUriForFile}
+        onRetryUpload={async () => {}}
+        onRetryFetch={handleRetryFetch}
+        onClearError={undefined}
+        expanded={missingExpanded}
+        onToggle={() => setMissingExpanded(!missingExpanded)}
       />
       <ExpandableSection
         title="Recent Files"
