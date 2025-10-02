@@ -99,24 +99,12 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
 
       const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
 
-      let force = false;
       if (pickedSize !== meta.size) {
-        const alertResult = await new Promise<{ action: string }>((resolve) => {
-          Alert.alert(
-            "Size Mismatch",
-            `Expected size: ${meta.size}, Picked: ${pickedSize}. Proceed anyway?`,
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Force Upload",
-                onPress: () => resolve({ action: "force" }),
-              },
-            ],
-          );
-        });
-        const { action } = alertResult;
-        if (action !== "force") return;
-        force = true;
+        Alert.alert(
+          "Size Mismatch",
+          `Expected size: ${meta.size}, Picked: ${pickedSize}. File does not match.`,
+        );
+        return;
       }
 
       const fileContent = await FileSystem.readAsStringAsync(fileUri, {
@@ -128,48 +116,27 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
         { encoding: Crypto.CryptoEncoding.BASE64 },
       );
 
-      if (computedHash !== meta.sha256 && !force) {
-        const alertResult = await new Promise<{ action: string }>((resolve) => {
-          Alert.alert(
-            "Hash Mismatch",
-            `Expected SHA256: ${meta.sha256}, Computed: ${computedHash}. Proceed anyway?`,
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Force Upload",
-                onPress: () => resolve({ action: "force" }),
-              },
-            ],
-          );
-        });
-        const { action } = alertResult;
-        if (action !== "force") return;
-        force = true;
+      if (computedHash !== meta.sha256) {
+        Alert.alert(
+          "Hash Mismatch",
+          `Expected SHA256: ${meta.sha256}, Computed: ${computedHash}. File does not match.`,
+        );
+        return;
       }
 
-      if (pickedMime !== meta.mime && !force) {
-        const alertResult = await new Promise<{ action: string }>((resolve) => {
-          Alert.alert(
-            "MIME Mismatch",
-            `Expected MIME: ${meta.mime}, Picked: ${pickedMime}. Proceed anyway?`,
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Force Upload",
-                onPress: () => resolve({ action: "force" }),
-              },
-            ],
-          );
-        });
-        const { action } = alertResult;
-        if (action !== "force") return;
+      if (pickedMime !== meta.mime) {
+        Alert.alert(
+          "MIME Mismatch",
+          `Expected MIME: ${meta.mime}, Picked: ${pickedMime}. File does not match.`,
+        );
+        return;
       }
 
       const dataUri =
         `data:${pickedMime || meta.mime};base64,${fileContent}` as DataUri;
 
       await onManualUpload(fileId, dataUri);
-      Alert.alert("Upload", "File uploaded successfully.");
+      Alert.alert("Upload", "Matching file uploaded successfully.");
     } catch (error) {
       console.error("Upload error:", error);
       Alert.alert("Upload Error", `Failed to upload: ${error}`);
