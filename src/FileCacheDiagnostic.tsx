@@ -4,7 +4,6 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import React, { useState } from "react";
 import {
-  Alert,
   Image,
   Linking,
   StyleSheet,
@@ -29,6 +28,7 @@ import {
   useUploadErrorsRecord,
 } from "./provider";
 import { DataUri, FileId, FileMeta, FileRecord } from "./types";
+import { UserError } from "./UserError.js";
 
 interface FileDetailsProps {
   fileId: FileId;
@@ -74,127 +74,92 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
       meta.sha256 == null ||
       meta.mime == null
     ) {
-      Alert.alert(
-        "Retry not available",
-        "Retry pick requires putUrl and complete meta data.",
-      );
-      return;
+      throw new UserError("Retry not available");
     }
 
     if (meta.size == null || meta.sha256 == null || meta.mime == null) {
-      Alert.alert("Invalid meta", "Meta data is incomplete.");
-      return;
+      throw new UserError("Invalid meta");
     }
 
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: meta.mime,
-        copyToCacheDirectory: false,
-      });
+    const result = await DocumentPicker.getDocumentAsync({
+      type: meta.mime,
+      copyToCacheDirectory: false,
+    });
 
-      if (!result.output) return;
+    if (!result.output) return;
 
-      const item = result.output.item[0];
-      if (!item) return;
+    const item = result.output.item[0];
+    if (!item) return;
 
-      const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
+    const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
 
-      if (pickedSize !== meta.size) {
-        Alert.alert(
-          "Size Mismatch",
-          `Expected size: ${meta.size}, Picked: ${pickedSize}. File does not match.`,
-        );
-        return;
-      }
-
-      const fileContent = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const computedHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        fileContent,
-        { encoding: Crypto.CryptoEncoding.BASE64 },
+    if (pickedSize !== meta.size) {
+      throw new UserError(
+        `Size Mismatch: Expected size: ${meta.size}, Picked: ${pickedSize}. File does not match.`,
       );
-
-      if (computedHash !== meta.sha256) {
-        Alert.alert(
-          "Hash Mismatch",
-          `Expected SHA256: ${meta.sha256}, Computed: ${computedHash}. File does not match.`,
-        );
-        return;
-      }
-
-      if (pickedMime !== meta.mime) {
-        Alert.alert(
-          "MIME Mismatch",
-          `Expected MIME: ${meta.mime}, Picked: ${pickedMime}. File does not match.`,
-        );
-        return;
-      }
-
-      const dataUri =
-        `data:${pickedMime || meta.mime};base64,${fileContent}` as DataUri;
-
-      await onManualUpload(fileId, dataUri);
-      Alert.alert("Upload", "Matching file uploaded successfully.");
-    } catch (error) {
-      console.error("Upload error:", error);
-      Alert.alert("Upload Error", `Failed to upload: ${error}`);
     }
+
+    const fileContent = await FileSystem.readAsStringAsync(fileUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const computedHash = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      fileContent,
+      { encoding: Crypto.CryptoEncoding.BASE64 },
+    );
+
+    if (computedHash !== meta.sha256) {
+      throw new UserError(
+        `Hash Mismatch: Expected SHA256: ${meta.sha256}, Computed: ${computedHash}. File does not match.`,
+      );
+    }
+
+    if (pickedMime !== meta.mime) {
+      throw new UserError(
+        `MIME Mismatch: Expected MIME: ${meta.mime}, Picked: ${pickedMime}. File does not match.`,
+      );
+    }
+
+    const dataUri =
+      `data:${pickedMime || meta.mime};base64,${fileContent}` as DataUri;
+
+    await onManualUpload(fileId, dataUri);
   };
 
-  const handleChangeFileClick = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        copyToCacheDirectory: false,
-      });
+  const handleChangeFileClick = setMetaUri
+    ? async () => {
+        const result = await DocumentPicker.getDocumentAsync({
+          copyToCacheDirectory: false,
+        });
 
-      if (!result.output) return;
+        if (!result.output) return;
 
-      const item = result.output.item[0];
-      if (!item) return;
+        const item = result.output.item[0];
+        if (!item) return;
 
-      const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
+        const { uri: fileUri, size: pickedSize, mimeType: pickedMime } = item;
 
-      const fileContent = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const computedHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        fileContent,
-        { encoding: Crypto.CryptoEncoding.BASE64 },
-      );
+        const fileContent = await FileSystem.readAsStringAsync(fileUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const computedHash = await Crypto.digestStringAsync(
+          Crypto.CryptoDigestAlgorithm.SHA256,
+          fileContent,
+          { encoding: Crypto.CryptoEncoding.BASE64 },
+        );
 
-      const newDataUri = `data:${pickedMime};base64,${fileContent}` as DataUri;
+        const newDataUri =
+          `data:${pickedMime};base64,${fileContent}` as DataUri;
 
-      if (setMetaUri) {
         await setMetaUri(newDataUri);
-        Alert.alert("Change", "File changed and meta updated.");
-      } else {
-        Alert.alert(
-          "Change",
-          "File data updated, but meta update not available.",
-        );
       }
-    } catch (error) {
-      console.error("Change error:", error);
-      Alert.alert("Change Error", `Failed to change: ${error}`);
-    }
-  };
+    : undefined;
 
-  const handleDeleteClick = async () => {
-    try {
-      if (setMetaUri) {
+  const handleDeleteClick = setMetaUri
+    ? async () => {
         await setMetaUri(null);
-        Alert.alert("Delete", "File deleted and meta nulled.");
-      } else {
-        Alert.alert("Delete", "File data nulled, but meta not available.");
       }
-    } catch (error) {
-      console.error("Delete error:", error);
-      Alert.alert("Delete Error", `Failed to delete: ${error}`);
-    }
-  };
+    : undefined;
 
   const isGetUrlDisabled = !(urls?.getUrl && urls.getUrl !== null);
   const isPutUrlDisabled =
@@ -589,27 +554,22 @@ export const FileCacheDiagnostic: React.FC = () => {
       <Text style={styles.title}>File Cache Diagnostic</Text>
       <TouchableOpacity
         style={styles.actionButton}
-        onPress={() =>
-          sync?.().then(() => Alert.alert("Sync", "Sync completed"))
-        }
+        disabled={!sync}
+        onPress={() => sync?.()}
       >
         <Text style={styles.buttonText}>Sync Cache</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.actionButton}
-        onPress={() =>
-          reset?.().then(() => Alert.alert("Reset", "Cache reset"))
-        }
+        disabled={!reset}
+        onPress={() => reset?.()}
       >
         <Text style={styles.buttonText}>Reset Cache</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.actionButton}
-        onPress={() =>
-          refreshNonPending?.().then(() =>
-            Alert.alert("Refresh", "Non-pending cleared"),
-          )
-        }
+        disabled={!refreshNonPending}
+        onPress={() => refreshNonPending?.()}
       >
         <Text style={styles.buttonText}>Refresh Non-Pending</Text>
       </TouchableOpacity>
