@@ -115,7 +115,7 @@ export const FileCacheProvider2 = ({
       uploadErrorStorage={useManagedUriStorage(
         usePlatformLocalStorage(uploadErrorCachePath),
       )}
-      getFileRecord={useGetMeta(getFiles)}
+      getFileRecord={useGetMeta(getFilesLocal)}
       getSignedUrls={useGetUrlsById(getFiles)}
     >
       {children}

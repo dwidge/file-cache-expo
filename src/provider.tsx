@@ -10,6 +10,7 @@ import { useLocal } from "@dwidge/crud-api-react";
 import {
   AsyncDispatch,
   AsyncState,
+  getActionValue,
   Json,
   useConvert,
   useJson,
@@ -45,6 +46,8 @@ import {
 import {
   getDataUriFromBufferBin,
   getMetaBufferFromDataUri,
+  getMimeTypeFromDataUri,
+  getSha256HexFromDataUri,
   getSizeFromDataUri,
   MetaNull,
 } from "./uri.js";
@@ -1085,17 +1088,77 @@ export const FileCacheProvider = ({
 
     useMountTrackerItem(mountTracker, fileId);
 
+    /**
+     * Verify data URI against file metadata.
+     */
+    const verifyDataUriAgainstMeta = useCallback(
+      async (
+        dataUri: DataUri | null | undefined,
+        fileMeta: MetaNull | null,
+      ): Promise<DataUri | null | undefined> => {
+        if (dataUri) {
+          if (!fileMeta)
+            throw new Error("verifyDataUriAgainstMetaE1: Missing fileMeta");
+
+          if (fileMeta.mime !== null) {
+            const dataMime = getMimeTypeFromDataUri(dataUri);
+            if (dataMime !== fileMeta.mime) {
+              throw new Error(
+                `verifyDataUriAgainstMetaE2: MIME mismatch: expected ${fileMeta.mime}, got ${dataMime}`,
+              );
+            }
+          }
+
+          if (fileMeta.size !== null) {
+            const dataSize = getSizeFromDataUri(dataUri);
+            if (dataSize !== fileMeta.size) {
+              throw new Error(
+                `verifyDataUriAgainstMetaE3: Size mismatch: expected ${fileMeta.size}, got ${dataSize}`,
+              );
+            }
+          }
+
+          if (fileMeta.sha256 !== null) {
+            const dataSha = await getSha256HexFromDataUri(dataUri);
+            if (dataSha !== fileMeta.sha256) {
+              throw new Error(
+                `verifyDataUriAgainstMetaE4: SHA256 mismatch: expected ${fileMeta.sha256}, got ${dataSha}`,
+              );
+            }
+          }
+        }
+
+        return dataUri;
+      },
+      [],
+    );
+
     const setItem: AsyncDispatch<DataUri | null | undefined> | undefined =
       useMemo(
         () =>
           fileId !== undefined &&
           setUploadUri &&
+          getFileRecord &&
           uploadFileIds &&
           uploadFileIds.length < maxUploadCache
-            ? async (data) => setUploadUri(data)
+            ? async (data) =>
+                setUploadUri(
+                  await verifyDataUriAgainstMeta(
+                    await getActionValue(data, null),
+                    await getFileRecord(fileId),
+                  ),
+                )
             : undefined,
-        [fileId, setUploadUri, uploadFileIds, maxUploadCache],
+        [
+          fileId,
+          setUploadUri,
+          uploadFileIds,
+          maxUploadCache,
+          getFileRecord,
+          verifyDataUriAgainstMeta,
+        ],
       );
+
     return [
       uploadErrorUri !== undefined
         ? uploadErrorUri
