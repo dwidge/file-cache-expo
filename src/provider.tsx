@@ -447,6 +447,45 @@ const useEvictionCacheManager = ({
 };
 
 /**
+ * State updater for missing file IDs.
+ * Adds or removes an ID from the list of missing file IDs.
+ *
+ * @param id - The file ID.
+ * @param enable - Whether to add (true) or remove (false) the ID. Defaults to false.
+ * @returns A function that updates the previous state array.
+ */
+const setMissingId =
+  (id: FileId, enable = false) =>
+  (prev: string[]) => {
+    if (enable == prev.includes(id)) return prev;
+    if (enable) return [...new Set([...prev, id])];
+    else return prev.filter((p) => p !== id);
+  };
+
+/**
+ * State updater for cache errors.
+ * Adds or removes/clears an error message for a specific file ID.
+ *
+ * @param id - The file ID.
+ * @param error - The error message to set, or null to clear.
+ * @returns A function that updates the previous state record.
+ */
+const setCacheError =
+  (id: FileId, error: string | null) => (prev: Record<string, string>) => {
+    if (prev[id] == error) return prev;
+    if (error) {
+      return {
+        ...prev,
+        [id]: `${error}` || "Unknown error",
+      };
+    } else {
+      const newErrors = { ...prev };
+      delete newErrors[id];
+      return newErrors;
+    }
+  };
+
+/**
  * Hook to manage live cache loading for mounted items.
  * This hook runs in useEffect within FileCacheProvider and fetches data for mounted IDs if online and not cached.
  */
@@ -510,13 +549,6 @@ const useLiveCacheManager = ({
       for (const id of filteredFetchIds) {
         log(`Cache1: Fetching mounted file ${id}...`);
         try {
-          setMissingFileIds((prev) => prev.filter((p) => p !== id));
-          setCacheErrors((prev) => {
-            const newErrors = { ...prev };
-            delete newErrors[id];
-            return newErrors;
-          });
-
           const dataUri = await downloadFile(id);
           if (dataUri === undefined) {
             log(`Cache2: No data on server for mounted file ${id}`, {
@@ -525,27 +557,28 @@ const useLiveCacheManager = ({
               cacheFileIds,
               uploadFileIds,
             });
-            setMissingFileIds((prev) => [...new Set([...prev, id])]);
-          } else if (dataUri === null) {
-            await setUri(id, null);
-            fetchedIdsRef.current.add(id);
-            log(`Cache2: File deleted on server for mounted file ${id}`);
+            setMissingFileIds(setMissingId(id, true));
           } else {
-            await setUri(id, dataUri);
-            fetchedIdsRef.current.add(id);
-            log(`Cache3: Fetched and cached mounted file ${id}`, {
-              filteredFetchIds,
-              mountedFileIds,
-              cacheFileIds,
-              uploadFileIds,
-            });
+            if (dataUri === null) {
+              await setUri(id, null);
+              fetchedIdsRef.current.add(id);
+              log(`Cache2: File deleted on server for mounted file ${id}`);
+            } else {
+              await setUri(id, dataUri);
+              fetchedIdsRef.current.add(id);
+              log(`Cache3: Fetched and cached mounted file ${id}`, {
+                filteredFetchIds,
+                mountedFileIds,
+                cacheFileIds,
+                uploadFileIds,
+              });
+            }
+            setMissingFileIds(setMissingId(id, false));
           }
+          setCacheErrors(setCacheError(id, null));
         } catch (error: unknown) {
           log(`Cache4: Error fetching mounted file ${id}:`, error);
-          setCacheErrors((prev) => ({
-            ...prev,
-            [id]: `${error}` || "Unknown error",
-          }));
+          setCacheErrors(setCacheError(id, `${error}`));
         }
       }
 
@@ -791,30 +824,22 @@ export const FileCacheProvider = ({
                   `syncPendingFilesE1: Error upload pending file ${id}: ${error}`,
                   { cause: error },
                 );
-                setUploadErrors((prev) => ({
-                  ...prev,
-                  [id]: `${error}` || "Unknown upload error",
-                }));
+                setUploadErrors(setCacheError(id, `${error}`));
                 const dataUri = await getUploadUri(id);
-                if (dataUri === undefined) {
+                if (dataUri === undefined)
                   log(
                     `syncPendingFilesE21: DataUri not found in uploadStorage for file ${id} after upload failure.`,
                   );
-                } else if (dataUri === null) {
+                else if (dataUri === null)
                   log(
                     `syncPendingFilesE22: DataUri found in uploadStorage for file ${id} (null) after upload failure.`,
                   );
-                } else {
+                else
                   log(
                     `syncPendingFilesE23: DataUri found in uploadStorage for file ${id} (length ${getSizeFromDataUri(dataUri)}) after upload failure.`,
                   );
-                }
 
-                const enhancedError =
-                  error instanceof Error ? error : new Error(`${error}`);
-                enhancedError.message = `File ${id}: ${enhancedError.message}`;
-                enhancedError.name = `UploadError`;
-                throw enhancedError;
+                throw error;
               }
             }),
           );
@@ -919,7 +944,7 @@ export const FileCacheProvider = ({
 
                 if (dataUri === undefined) {
                   log(`File ${id} not found on server. Adding to missing.`);
-                  setMissingFileIds((prev) => [...new Set([...prev, id])]);
+                  setMissingFileIds(setMissingId(id, true));
                 } else if (dataUri === null) {
                   log(`File ${id} is deleted. Not added to cache.`);
                 } else {
@@ -934,16 +959,8 @@ export const FileCacheProvider = ({
                   `syncLatestFilesE2: Error refreshing cache for file ${id}: ${error}`,
                   { cause: error },
                 );
-                setCacheErrors((prev) => ({
-                  ...prev,
-                  [id]: `${error}` || "Unknown fetch error",
-                }));
-
-                const enhancedError =
-                  error instanceof Error ? error : new Error(`${error}`);
-                enhancedError.message = `File ${id}: ${enhancedError.message}`;
-                enhancedError.name = `DownloadError`;
-                throw enhancedError;
+                setCacheErrors(setCacheError(id, `${error}`));
+                throw error;
               }
             }),
           );
@@ -955,11 +972,7 @@ export const FileCacheProvider = ({
             .filter((result) => result.status === "rejected")
             .map((result) => (result as PromiseRejectedResult).reason);
           if (errors.length > 0) {
-            const aggregateError = new AggregateError(
-              errors,
-              "One or more downloads failed",
-            );
-            throw aggregateError;
+            throw new AggregateError(errors, "One or more downloads failed");
           }
         }
       : undefined;
