@@ -156,8 +156,20 @@ const FileDetailsInline: React.FC<FileDetailsProps> = ({
             SHA256:{" "}
             {record.sha256 ? `${record.sha256.substring(0, 16)}...` : "N/A"}
           </Text>
+          {record.createdAt && (
+            <Text>
+              Created: {new Date(record.createdAt * 1000).toISOString()}
+            </Text>
+          )}
           {record.updatedAt && (
-            <Text>Updated: {new Date(record.updatedAt).toISOString()}</Text>
+            <Text>
+              Updated: {new Date(record.updatedAt * 1000).toISOString()}
+            </Text>
+          )}
+          {record.deletedAt && (
+            <Text>
+              Deleted: {new Date(record.deletedAt * 1000).toISOString()}
+            </Text>
           )}
         </View>
       )}
