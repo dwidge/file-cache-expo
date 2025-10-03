@@ -1,4 +1,4 @@
-import { viewUri } from "@dwidge/expo-download-uri";
+import { viewUri } from "@dwidge/expo-export-uri";
 import React, { useState } from "react";
 import {
   Image,
