@@ -510,6 +510,13 @@ const useLiveCacheManager = ({
       for (const id of filteredFetchIds) {
         log(`Cache1: Fetching mounted file ${id}...`);
         try {
+          setMissingFileIds((prev) => prev.filter((p) => p !== id));
+          setCacheErrors((prev) => {
+            const newErrors = { ...prev };
+            delete newErrors[id];
+            return newErrors;
+          });
+
           const dataUri = await downloadFile(id);
           if (dataUri === undefined) {
             log(`Cache2: No data on server for mounted file ${id}`, {
@@ -522,12 +529,10 @@ const useLiveCacheManager = ({
           } else if (dataUri === null) {
             await setUri(id, null);
             fetchedIdsRef.current.add(id);
-            setMissingFileIds((prev) => prev.filter((p) => p !== id));
             log(`Cache2: File deleted on server for mounted file ${id}`);
           } else {
             await setUri(id, dataUri);
             fetchedIdsRef.current.add(id);
-            setMissingFileIds((prev) => prev.filter((p) => p !== id));
             log(`Cache3: Fetched and cached mounted file ${id}`, {
               filteredFetchIds,
               mountedFileIds,
@@ -740,6 +745,8 @@ export const FileCacheProvider = ({
       ? async (signal, concurrency = 1): Promise<void> => {
           log("Start upload pending list...", { count: uploadFileIds.length });
 
+          setUploadErrors({});
+
           const limit = pLimit(concurrency);
           const promises = uploadFileIds.map((id) =>
             limit(async () => {
@@ -777,12 +784,6 @@ export const FileCacheProvider = ({
                 });
                 await setCacheUri(id, dataUri);
                 await deleteUploadUri(id);
-                setMissingFileIds((prev) => prev.filter((p) => p !== id));
-                setUploadErrors((prev) => {
-                  const newErrors = { ...prev };
-                  delete newErrors[id];
-                  return newErrors;
-                });
               } catch (error: unknown) {
                 if (signal?.aborted) throw error;
 
@@ -852,11 +853,9 @@ export const FileCacheProvider = ({
           assert(recentFileIds);
 
           const cacheableCount = ((maxCache * 3) / 4) | 0;
+          const cacheableIds = (await getCacheableIds(cacheableCount)) ?? [];
           let currentCachedIds = [...cacheFileIds];
-          const idsToFetch = [
-            ...recentFileIds,
-            ...((await getCacheableIds(cacheableCount)) ?? []),
-          ]
+          const idsToFetch = [...recentFileIds, ...cacheableIds]
             .filter((id) => !currentCachedIds.includes(id))
             .slice(0, cacheableCount);
 
@@ -905,6 +904,9 @@ export const FileCacheProvider = ({
 
           log("Start fetching...", { count: finalIdsToFetch.length });
 
+          setMissingFileIds([]);
+          setCacheErrors({});
+
           const limit = pLimit(concurrency);
           const promises = finalIdsToFetch.map((id) =>
             limit(async () => {
@@ -920,17 +922,10 @@ export const FileCacheProvider = ({
                   setMissingFileIds((prev) => [...new Set([...prev, id])]);
                 } else if (dataUri === null) {
                   log(`File ${id} is deleted. Not added to cache.`);
-                  setMissingFileIds((prev) => prev.filter((p) => p !== id));
                 } else {
                   await setCacheUri(id, dataUri);
                   currentCachedIds.push(id);
-                  setMissingFileIds((prev) => prev.filter((p) => p !== id));
                   log(`File ${id} fetched and cached.`);
-                  setCacheErrors((prev) => {
-                    const newErrors = { ...prev };
-                    delete newErrors[id];
-                    return newErrors;
-                  });
                 }
               } catch (error: unknown) {
                 if (signal?.aborted) throw error;
@@ -1151,13 +1146,17 @@ export const FileCacheProvider = ({
           getFileRecord &&
           uploadFileIds &&
           uploadFileIds.length < maxUploadCache
-            ? async (data) =>
-                setUploadUri(
+            ? async (data) => {
+                const r = await setUploadUri(
                   await verifyDataUriAgainstMeta(
                     await getActionValue(data, null),
                     await getFileRecord(fileId),
                   ),
-                )
+                );
+                clearUploadError(fileId);
+                clearCacheError(fileId);
+                return r;
+              }
             : undefined,
         [
           fileId,
@@ -1166,6 +1165,8 @@ export const FileCacheProvider = ({
           maxUploadCache,
           getFileRecord,
           verifyDataUriAgainstMeta,
+          clearUploadError,
+          clearCacheError,
         ],
       );
 
