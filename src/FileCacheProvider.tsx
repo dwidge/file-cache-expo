@@ -1,4 +1,8 @@
-import { ApiGetList, ApiSetList } from "@dwidge/crud-api-react";
+import {
+  ApiFilterObject,
+  ApiGetList,
+  ApiSetList,
+} from "@dwidge/crud-api-react";
 import { AsyncDispatch, AsyncState, getActionValue } from "@dwidge/hooks-react";
 import { AxiosInstance } from "axios";
 import { PropsWithChildren } from "react";
@@ -23,13 +27,18 @@ import { usePlatformLocalStorage } from "./usePlatformLocalStorage";
 const useGetUrls = (getFiles?: ApiGetList<FileRecord>) =>
   getFiles
     ? async (
-        filter: Pick<FileRecord, "id">,
-      ): Promise<Pick<FileRecord, "putUrl" | "getUrl"> | null> => {
-        return (
-          (await getFiles(filter, { columns: ["getUrl", "putUrl"] }))?.[0] ??
-          null
-        );
-      }
+        filter: ApiFilterObject<Pick<FileRecord, "id">>,
+      ): Promise<
+        Partial<
+          Pick<
+            FileRecord,
+            "putUrl" | "getUrl" | "id" | "size" | "mime" | "sha256"
+          >
+        >[]
+      > =>
+        await getFiles(filter, {
+          columns: ["getUrl", "putUrl", "id", "size", "mime", "sha256"],
+        })
     : undefined;
 
 const useGetUrlsById = (getFiles?: ApiGetList<FileRecord>) =>

@@ -292,7 +292,7 @@ export const useUploadFileId = (
           );
 
         const { meta, buffer } = file;
-        const fileRecord = await getUrls({ id });
+        const [fileRecord] = await getUrls({ id });
         const { getUrl, putUrl } = fileRecord ?? {};
         if (putUrl && getUrl) {
           log(`Uploading file ${id}`);
@@ -332,7 +332,7 @@ export const useDownloadFileId = (
 ): ((id: FileId) => Promise<DataUri | null | undefined>) | Disabled =>
   getUrls
     ? async (id: FileId): Promise<DataUri | null | undefined> => {
-        const record: Partial<FileRecord> | null = await getUrls({ id });
+        const [record] = await getUrls({ id });
         if (!record)
           throw new Error(
             `useDownloadFileIdE2: No record/meta found for file id ${id}`,

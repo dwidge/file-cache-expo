@@ -2,6 +2,7 @@
  * @module fileCache/types
  */
 
+import { ApiFilterObject } from "@dwidge/crud-api-react";
 import { AsyncState } from "@dwidge/hooks-react";
 
 export type FileUri = string & { readonly __brand: "FileUri" };
@@ -44,8 +45,12 @@ export type FileMeta = {
  * Should return a FileMeta containing at least the `putUrl` and `getUrl`.
  */
 export type GetFileUrls = (
-  v: Pick<FileRecord, "id">,
-) => Promise<Partial<Pick<FileRecord, "putUrl" | "getUrl">> | null>;
+  v: ApiFilterObject<Pick<FileRecord, "id">>,
+) => Promise<
+  Partial<
+    Pick<FileRecord, "putUrl" | "getUrl" | "id" | "size" | "mime" | "sha256">
+  >[]
+>;
 
 /** File identifier type. */
 export type FileId = string;
