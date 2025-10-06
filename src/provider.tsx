@@ -16,7 +16,6 @@ import {
   useJson,
 } from "@dwidge/hooks-react";
 import assert from "assert";
-import { AxiosInstance } from "axios";
 import pLimit from "p-limit";
 import {
   createContext,
@@ -29,20 +28,16 @@ import {
   useState,
 } from "react";
 import { z } from "zod";
-import { getBufferFromUrlAndVerify } from "./getBufferFromUrl.js";
 import { log } from "./log.js";
 import {
   DataUri,
   Deleted,
   Disabled,
   FileId,
-  FileMeta,
   FileRecord,
-  GetFileUrls,
   Loading,
 } from "./types.js";
 import {
-  getDataUriFromBufferBin,
   getMimeTypeFromDataUri,
   getSha256HexFromDataUri,
   getSizeFromDataUri,
@@ -269,58 +264,6 @@ const addToLimitedQueue = (
     ? updatedRecentIds.slice(0, maxIds)
     : updatedRecentIds;
 };
-
-/**
- * Hook to get a function that downloads a file from remote storage.
- *
- * @param getUrls - A function that returns signed URLs for a file.
- * @returns A function that downloads and returns the file’s DataUri.
- */
-export const useDownloadFileId = (
-  getUrls?: GetFileUrls,
-  axios?: AxiosInstance,
-): ((id: FileId) => Promise<DataUri | null | undefined>) | Disabled =>
-  getUrls
-    ? async (id: FileId): Promise<DataUri | null | undefined> => {
-        const [record] = await getUrls({ id });
-        if (!record)
-          throw new Error(
-            `useDownloadFileIdE2: No record/meta found for file id ${id}`,
-            { cause: { id } },
-          );
-
-        if (
-          record.size === null &&
-          record.mime === null &&
-          record.sha256 === null
-        )
-          return null;
-
-        if (record.size == null || record.mime == null || record.sha256 == null)
-          throw new Error(
-            `useDownloadFileIdE1: Incomplete file meta for file ${id}`,
-            { cause: { fileMeta: record } },
-          );
-
-        if (!record.getUrl)
-          throw new Error(
-            `useDownloadFileIdE3: No download URL available for file id ${id}`,
-            { cause: { id } },
-          );
-
-        const meta: FileMeta = {
-          size: record.size,
-          mime: record.mime,
-          sha256: record.sha256,
-        };
-        const bufferBin = await getBufferFromUrlAndVerify({
-          getUrl: record.getUrl,
-          meta,
-          axios,
-        });
-        return bufferBin ? getDataUriFromBufferBin(bufferBin) : undefined;
-      }
-    : undefined;
 
 /**
  * Hook to get signed URLs for a file.
