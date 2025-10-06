@@ -1,5 +1,6 @@
 import assert from "assert";
 import pLimit from "p-limit";
+import { processInChunks } from "./chunked.js";
 import { evictCacheItem } from "./evictCacheItem.js";
 import { log } from "./log.js";
 import { setCacheError } from "./setCacheError.js";
@@ -106,7 +107,8 @@ export const syncLatestFiles = async ({
   setMissingFileIds([]);
   setCacheErrors({});
 
-  const urlRecords = await getSignedUrls(finalIdsToFetch);
+  const urlRecords = await processInChunks(finalIdsToFetch, 50, getSignedUrls);
+
   const urlRecordsMap = new Map(
     urlRecords.filter((r) => r).map((r) => [r!.id, r!]),
   );

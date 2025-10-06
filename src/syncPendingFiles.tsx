@@ -1,4 +1,5 @@
 import pLimit from "p-limit";
+import { processInChunks } from "./chunked.js";
 import { log } from "./log.js";
 import { setCacheError } from "./setCacheError.js";
 import { FileId } from "./types.js";
@@ -47,7 +48,8 @@ export const syncPendingFiles = async ({
     return;
   }
 
-  const urlRecords = await getSignedUrls(uploadFileIds);
+  const urlRecords = await processInChunks(uploadFileIds, 50, getSignedUrls);
+
   const urlRecordsMap = new Map(
     urlRecords.filter((r) => r).map((r) => [r!.id, r!]),
   );
