@@ -33,6 +33,7 @@ import {
   getBufferFromUrlAndVerify,
   putBufferToUrlAndVerify,
 } from "./getBufferFromUrl.js";
+import { log } from "./log.js";
 import {
   DataUri,
   Deleted,
@@ -53,8 +54,6 @@ import {
 } from "./uri.js";
 import { ManagedUriStorage, useManagedUriItem } from "./useLocalUri.js";
 import { useMountTracker, useMountTrackerItem } from "./useMountTracker.js";
-
-const log = (...args) => {};
 
 /**
  * The API exposed by the File Cache system.
