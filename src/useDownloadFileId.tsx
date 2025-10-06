@@ -3,6 +3,10 @@ import { getBufferFromUrlAndVerify } from "./getBufferFromUrl.js";
 import { DataUri, Disabled, FileId, FileMeta, GetFileUrls } from "./types.js";
 import { getDataUriFromBufferBin } from "./uri.js";
 
+export type DownloadFileId = (
+  id: FileId,
+) => Promise<DataUri | null | undefined>;
+
 /**
  * Hook to get a function that downloads a file from remote storage.
  *
@@ -12,7 +16,7 @@ import { getDataUriFromBufferBin } from "./uri.js";
 export const useDownloadFileId = (
   getUrls?: GetFileUrls,
   axios?: AxiosInstance,
-): ((id: FileId) => Promise<DataUri | null | undefined>) | Disabled =>
+): DownloadFileId | Disabled =>
   getUrls
     ? async (id: FileId): Promise<DataUri | null | undefined> => {
         const [record] = await getUrls({ id });

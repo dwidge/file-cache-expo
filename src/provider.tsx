@@ -15,8 +15,6 @@ import {
   useConvert,
   useJson,
 } from "@dwidge/hooks-react";
-import assert from "assert";
-import pLimit from "p-limit";
 import {
   createContext,
   ReactNode,
@@ -28,7 +26,12 @@ import {
   useState,
 } from "react";
 import { z } from "zod";
+import { evictCacheItem } from "./evictCacheItem.js";
 import { log } from "./log.js";
+import { setCacheError } from "./setCacheError.js";
+import { setMissingId } from "./setMissingId.js";
+import { syncLatestFiles } from "./syncLatestFiles.js";
+import { syncPendingFiles } from "./syncPendingFiles.js";
 import {
   DataUri,
   Deleted,
@@ -219,33 +222,6 @@ export type FileCacheProviderProps = {
 };
 
 /**
- * Evict the oldest cached file (that is not pending, recent or mounted) to free cache space.
- *
- * @param cachedIds - Array of currently cached file IDs.
- * @param mountedIds - Array of mounted file IDs.
- * @param recentIds - Array of recent file IDs.
- * @param setUri - Function to set URI in storage.
- * @returns The evicted file ID, or null if no candidate can be evicted.
- */
-const evictCacheItem = async (
-  cachedIds: FileId[],
-  mountedIds: FileId[],
-  recentIds: FileId[],
-  setUri: ManagedUriStorage["setUri"],
-): Promise<FileId | null> => {
-  assert(setUri);
-  const candidates = cachedIds.filter(
-    (id) => !mountedIds.includes(id) && !recentIds.includes(id),
-  );
-  if (candidates.length === 0) return null;
-  const evictId = candidates[candidates.length - 1];
-  assert(evictId);
-  await setUri(evictId, undefined);
-  log(`Evicted cache item: ${evictId}`);
-  return evictId;
-};
-
-/**
  * Add an ID to the top of the list, maintaining the limit and order by recency.
  * If the ID is already in the list, move it to the beginning.
  *
@@ -338,45 +314,6 @@ const useEvictionCacheManager = ({
     runEviction();
   }, [maxCache, cacheFileIds, recentFileIds, mountedFileIds, setUri]);
 };
-
-/**
- * State updater for missing file IDs.
- * Adds or removes an ID from the list of missing file IDs.
- *
- * @param id - The file ID.
- * @param enable - Whether to add (true) or remove (false) the ID. Defaults to false.
- * @returns A function that updates the previous state array.
- */
-const setMissingId =
-  (id: FileId, enable = false) =>
-  (prev: string[]) => {
-    if (enable == prev.includes(id)) return prev;
-    if (enable) return [...new Set([...prev, id])];
-    else return prev.filter((p) => p !== id);
-  };
-
-/**
- * State updater for cache errors.
- * Adds or removes/clears an error message for a specific file ID.
- *
- * @param id - The file ID.
- * @param error - The error message to set, or null to clear.
- * @returns A function that updates the previous state record.
- */
-const setCacheError =
-  (id: FileId, error: string | null) => (prev: Record<string, string>) => {
-    if (prev[id] == error) return prev;
-    if (error) {
-      return {
-        ...prev,
-        [id]: `${error}` || "Unknown error",
-      };
-    } else {
-      const newErrors = { ...prev };
-      delete newErrors[id];
-      return newErrors;
-    }
-  };
 
 /**
  * Hook to manage live cache loading for mounted items.
@@ -651,226 +588,6 @@ export const FileCacheProvider = ({
   });
 
   /**
-   * Synchronize pending files by uploading each one.
-   *
-   * For each file ID in the pending list, the corresponding DataUri is loaded
-   * from upload storage and then uploaded remotely. Upon successful upload,
-   * the file data is moved from upload storage to cache storage.
-   */
-  const syncPendingFiles:
-    | ((signal?: AbortSignal, concurrency?: number) => Promise<void>)
-    | Disabled =
-    uploadFileIds &&
-    setUploadUri &&
-    getUploadUri &&
-    uploadFile &&
-    setCacheUri &&
-    deleteUploadUri &&
-    downloadFile &&
-    setUploadErrorUri
-      ? async (signal, concurrency = 1): Promise<void> => {
-          log("Start upload pending list...", { count: uploadFileIds.length });
-
-          setUploadErrors({});
-
-          const limit = pLimit(concurrency);
-          const promises = uploadFileIds.map((id) =>
-            limit(async () => {
-              if (signal?.aborted) throw new Error("Upload aborted");
-
-              try {
-                const dataUri = await getUploadUri(id);
-                if (signal?.aborted) throw new Error("Upload aborted");
-
-                if (dataUri === undefined)
-                  throw new Error(`Pending file not found in upload storage.`);
-
-                log(`Start upload pending file...`, {
-                  id,
-                  size: dataUri?.length ?? null,
-                });
-                await uploadFile(id, dataUri);
-                if (signal?.aborted) throw new Error("Upload aborted");
-
-                log(`Confirming upload for file ${id}...`);
-                const fetchedDataUri = await downloadFile(id);
-                if (fetchedDataUri !== dataUri)
-                  throw new Error(
-                    `Confirmation fetch failed: File not found on server after upload.`,
-                  );
-                if (fetchedDataUri?.length !== dataUri?.length)
-                  throw new Error(
-                    `Confirmation fetch failed: File size mismatch after upload.`,
-                  );
-
-                log(`Upload confirmed for file ${id}.`);
-
-                log(`Finish upload pending file.`, {
-                  id,
-                });
-                await setCacheUri(id, dataUri);
-                await deleteUploadUri(id);
-              } catch (error: unknown) {
-                if (signal?.aborted) throw error;
-
-                log(
-                  `syncPendingFilesE1: Error upload pending file ${id}: ${error}`,
-                  { cause: error },
-                );
-                setUploadErrors(setCacheError(id, `${error}`));
-                const dataUri = await getUploadUri(id);
-                if (dataUri === undefined)
-                  log(
-                    `syncPendingFilesE21: DataUri not found in uploadStorage for file ${id} after upload failure.`,
-                  );
-                else if (dataUri === null)
-                  log(
-                    `syncPendingFilesE22: DataUri found in uploadStorage for file ${id} (null) after upload failure.`,
-                  );
-                else
-                  log(
-                    `syncPendingFilesE23: DataUri found in uploadStorage for file ${id} (length ${getSizeFromDataUri(dataUri)}) after upload failure.`,
-                  );
-
-                throw error;
-              }
-            }),
-          );
-
-          log("Finish upload pending list.");
-
-          const results = await Promise.allSettled(promises);
-          const errors = results
-            .filter((result) => result.status === "rejected")
-            .map((result) => (result as PromiseRejectedResult).reason);
-          if (errors.length > 0) {
-            const aggregateError = new AggregateError(
-              errors,
-              "One or more uploads failed",
-            );
-            throw aggregateError;
-          }
-        }
-      : undefined;
-
-  /**
-   * Refresh the cache by downloading the latest files.
-   *
-   * For each file ID in the cacheable list that is not already in cache,
-   * download the file from remote. If the cache is full (taking into account
-   * pending files), evict the oldest cached file (that is not pending) before
-   * adding a new one. If the cache has old ids not in the list, remove them from cache.
-   */
-  const syncLatestFiles:
-    | ((signal?: AbortSignal, concurrency?: number) => Promise<void>)
-    | Disabled =
-    getCacheableIds && cacheFileIds && setCacheUri && downloadFile
-      ? async (signal, concurrency = 1) => {
-          assert(cacheFileIds);
-          assert(mountedFileIds);
-          assert(recentFileIds);
-
-          const cacheableCount = ((maxCache * 3) / 4) | 0;
-          const cacheableIds = (await getCacheableIds(cacheableCount)) ?? [];
-          let currentCachedIds = [...cacheFileIds];
-          const idsToFetch = [...recentFileIds, ...cacheableIds]
-            .filter((id) => !currentCachedIds.includes(id))
-            .slice(0, cacheableCount);
-
-          log("Start fetching...", { count: idsToFetch.length });
-          if (idsToFetch.length === 0) {
-            log("Finish fetching, no new files.");
-            return;
-          }
-
-          const numToEvict = Math.max(
-            0,
-            currentCachedIds.length + idsToFetch.length - maxCache,
-          );
-          if (numToEvict > 0) {
-            log(
-              `Try to make space in cacheStorage by evicting ${numToEvict} items...`,
-            );
-            for (let i = 0; i < numToEvict; i++) {
-              const evicted = await evictCacheItem(
-                currentCachedIds,
-                mountedFileIds,
-                recentFileIds,
-                setCacheUri,
-              );
-              if (!evicted) {
-                log(
-                  `Unable to evict cache item to make space in cacheStorage. Stop fetching for cache.`,
-                  {
-                    currentCachedIds,
-                    mountedFileIds,
-                    recentFileIds,
-                  },
-                );
-                break;
-              }
-              currentCachedIds = currentCachedIds.filter(
-                (cachedId) => cachedId !== evicted,
-              );
-            }
-          }
-
-          const finalIdsToFetch = idsToFetch.slice(
-            0,
-            maxCache - currentCachedIds.length,
-          );
-
-          log("Start fetching...", { count: finalIdsToFetch.length });
-
-          setMissingFileIds([]);
-          setCacheErrors({});
-
-          const limit = pLimit(concurrency);
-          const promises = finalIdsToFetch.map((id) =>
-            limit(async () => {
-              if (signal?.aborted) throw new Error("Sync aborted");
-
-              try {
-                log(`Try to fetch file ${id}...`);
-                const dataUri = await downloadFile(id);
-                if (signal?.aborted) throw new Error("Sync aborted");
-
-                if (dataUri === undefined) {
-                  log(`File ${id} not found on server. Adding to missing.`);
-                  setMissingFileIds(setMissingId(id, true));
-                } else if (dataUri === null) {
-                  log(`File ${id} is deleted. Not added to cache.`);
-                } else {
-                  await setCacheUri(id, dataUri);
-                  currentCachedIds.push(id);
-                  log(`File ${id} fetched and cached.`);
-                }
-              } catch (error: unknown) {
-                if (signal?.aborted) throw error;
-
-                log(
-                  `syncLatestFilesE2: Error refreshing cache for file ${id}: ${error}`,
-                  { cause: error },
-                );
-                setCacheErrors(setCacheError(id, `${error}`));
-                throw error;
-              }
-            }),
-          );
-
-          log("Finish fetching.");
-
-          const results = await Promise.allSettled(promises);
-          const errors = results
-            .filter((result) => result.status === "rejected")
-            .map((result) => (result as PromiseRejectedResult).reason);
-          if (errors.length > 0) {
-            throw new AggregateError(errors, "One or more downloads failed");
-          }
-        }
-      : undefined;
-
-  /**
    * Main sync function that uploads pending files and refreshes the cache.
    *
    * The function performs the following steps:
@@ -885,51 +602,94 @@ export const FileCacheProvider = ({
    *   - onProgress: Callback function receiving progress (0 to 100).
    * @returns A promise that resolves when sync is complete.
    */
-  const sync = useMemo(
-    () =>
-      syncPendingFiles && syncLatestFiles
-        ? async (options?: {
-            signal?: AbortSignal;
-            onProgress?: (progress: number) => void;
-            pull?: boolean;
-            concurrency?: number;
-          }) => {
-            log("Sync started");
-            const signal = options?.signal;
-            const concurrency = options?.concurrency ?? maxConcurrentFiles;
-            if (signal?.aborted) throw new Error("Sync aborted");
+  const sync = useMemo(() => {
+    const canSyncPending =
+      uploadFileIds &&
+      getUploadUri &&
+      uploadFile &&
+      downloadFile &&
+      setCacheUri &&
+      deleteUploadUri;
 
-            const totalTasks = 2;
-            let completedTasks = 0;
-            const reportProgress = () => {
-              if (options?.onProgress) {
-                const progress = completedTasks / totalTasks;
-                options.onProgress(progress);
-              }
-            };
+    const canSyncLatest =
+      getCacheableIds && cacheFileIds && downloadFile && setCacheUri;
 
-            await syncPendingFiles(signal, concurrency);
-            if (signal?.aborted) throw new Error("Sync aborted");
+    if (!canSyncPending || !canSyncLatest) {
+      return undefined;
+    }
 
-            completedTasks++;
-            reportProgress();
-            if (options?.pull !== false)
-              await syncLatestFiles(signal, concurrency);
-            if (signal?.aborted) throw new Error("Sync aborted");
+    return async (options?: {
+      signal?: AbortSignal;
+      onProgress?: (progress: number) => void;
+      pull?: boolean;
+      concurrency?: number;
+    }) => {
+      log("Sync started");
+      const signal = options?.signal;
+      const concurrency = options?.concurrency ?? maxConcurrentFiles;
+      if (signal?.aborted) throw new Error("Sync aborted");
 
-            completedTasks++;
-            reportProgress();
-            log("Sync finished");
-          }
-        : undefined,
-    [
-      syncPendingFiles,
-      syncLatestFiles,
-      mountedFileIds,
-      recentFileIds,
-      maxConcurrentFiles,
-    ],
-  );
+      const totalTasks = 2;
+      let completedTasks = 0;
+      const reportProgress = () => {
+        if (options?.onProgress) {
+          const progress = completedTasks / totalTasks;
+          options.onProgress(progress);
+        }
+      };
+
+      await syncPendingFiles({
+        uploadFileIds,
+        getUploadUri,
+        uploadFile,
+        downloadFile,
+        setCacheUri,
+        deleteUploadUri,
+        setUploadErrors,
+        signal,
+        concurrency,
+      });
+      if (signal?.aborted) throw new Error("Sync aborted");
+
+      completedTasks++;
+      reportProgress();
+      if (options?.pull !== false)
+        await syncLatestFiles({
+          getCacheableIds,
+          cacheFileIds,
+          downloadFile,
+          setCacheUri,
+          maxCache,
+          mountedFileIds,
+          recentFileIds,
+          setMissingFileIds,
+          setCacheErrors,
+          signal,
+          concurrency,
+        });
+      if (signal?.aborted) throw new Error("Sync aborted");
+
+      completedTasks++;
+      reportProgress();
+      log("Sync finished");
+    };
+  }, [
+    uploadFileIds,
+    getUploadUri,
+    uploadFile,
+    downloadFile,
+    setCacheUri,
+    deleteUploadUri,
+    setUploadErrors,
+    getCacheableIds,
+    cacheFileIds,
+    maxCache,
+    mountedFileIds,
+    recentFileIds,
+    setMissingFileIds,
+    setCacheErrors,
+    maxConcurrentFiles,
+  ]);
 
   /**
    * Function to reset the file cache, deleting all cached and pending files and clearing lists.

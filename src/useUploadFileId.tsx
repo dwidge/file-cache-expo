@@ -7,17 +7,21 @@ import { log } from "./log.js";
 import { DataUri, Deleted, Disabled, FileId, GetFileUrls } from "./types.js";
 import { getMetaBufferFromDataUri } from "./uri.js";
 
+export type UploadFileId = (
+  id: FileId,
+  data: DataUri | Deleted,
+) => Promise<void>;
+
 /**
  * Hook to get a function that uploads a file to remote storage.
  *
  * @param getUrls - A function that returns signed URLs for a file.
  * @returns A function that uploads the file data.
  */
-
 export const useUploadFileId = (
   getUrls?: GetFileUrls,
   axios?: AxiosInstance,
-): ((id: FileId, data: DataUri | Deleted) => Promise<void>) | Disabled =>
+): UploadFileId | Disabled =>
   getUrls && axios
     ? async (id: FileId, data: DataUri | Deleted): Promise<void> => {
         log(`useUploadFileId1`, id, data?.length);
