@@ -11,20 +11,7 @@ import {
 import { Expandable } from "./Expandable";
 import { useFileCache2Uri, usePickFileUri } from "./FileCacheProvider";
 import { getDataUriFromFileUri } from "./getDataUriFromFileUri";
-import {
-  useCacheErrorsRecord,
-  useCacheFileIds,
-  useClearCacheError,
-  useClearUploadError,
-  useErrorFileIds,
-  useFileCache,
-  useGetFileRecord,
-  useGetSignedUrls,
-  useMissingFileIds,
-  usePendingFileIds,
-  useRecentFileIds,
-  useUploadErrorsRecord,
-} from "./provider";
+import { useFileCache } from "./provider";
 import { DataUri, FileId, FileMeta, FileRecord } from "./types";
 import {
   asFileUri,
@@ -282,8 +269,7 @@ const FileItem: React.FC<FileItemProps> = ({
   onManualUpload,
   showRetry = false,
 }) => {
-  const getFileRecord = useGetFileRecord();
-  const getSignedUrls = useGetSignedUrls();
+  const { getFileRecord, getSignedUrls } = useFileCache();
   const [dataUri, setDataUri] = useFileCache2Uri(fileId, {
     setFiles: useFileCache().setFiles,
   }) ?? [undefined, undefined];
@@ -498,17 +484,21 @@ export const FileCacheDiagnostic: React.FC = () => {
   const [cacheErrorsExpanded, setCacheErrorsExpanded] = useState(false);
   const [uploadErrorsExpanded, setUploadErrorsExpanded] = useState(false);
 
-  const { sync, reset, refreshNonPending, uploadFile } = useFileCache();
-
-  const clearCacheError = useClearCacheError();
-  const clearUploadError = useClearUploadError();
-  const cacheErrors = useCacheErrorsRecord();
-  const uploadErrors = useUploadErrorsRecord();
-  const cacheIds = useCacheFileIds();
-  const pendingIds = usePendingFileIds();
-  const errorIds = useErrorFileIds();
-  const recentIds = useRecentFileIds();
-  const missingIds = useMissingFileIds();
+  const {
+    sync,
+    reset,
+    refreshNonPending,
+    uploadFile,
+    pendingIds,
+    errorIds,
+    cacheIds,
+    recentIds,
+    missingIds,
+    cacheErrors,
+    uploadErrors,
+    clearCacheError,
+    clearUploadError,
+  } = useFileCache();
 
   const handleRetryUpload = async (id: FileId, uri?: DataUri) => {
     console.log("Retry upload for", id, uri);

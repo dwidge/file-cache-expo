@@ -53,34 +53,34 @@ export type FileCache = {
   ) => AsyncState<DataUri | null | undefined> | Disabled;
   getItem: ((id: string) => Promise<DataUri | null | undefined>) | undefined;
   /**
-   * Hook to get a list of file IDs in the cache.
+   * List of file IDs in the cache.
    */
-  useCacheList: () => FileId[] | Loading;
+  cacheIds: FileId[] | Loading;
   /**
-   * Hook to get a list of file IDs in the cache that are pending upload.
+   * List of file IDs in the cache that are pending upload.
    */
-  usePendingList: () => FileId[] | Loading;
+  pendingIds: FileId[] | Loading;
   /**
-   * Hook to get a list of file IDs in the cache that are in error during upload.
+   * List of file IDs in the cache that are in error during upload.
    */
-  useErrorList: () => FileId[] | Loading;
+  errorIds: FileId[] | Loading;
   /**
-   * Hook to get a list of recently used file IDs.
+   * List of recently used file IDs.
    */
-  useRecentList: () => FileId[] | Loading;
+  recentIds: FileId[] | Loading;
   /**
-   * Hook to get a list of file IDs that are missing on the server (404).
+   * List of file IDs that are missing on the server (404).
    * These are files with non null meta data but have not yet been uploaded.
    */
-  useMissingList: () => FileId[] | Loading;
+  missingIds: FileId[] | Loading;
   /**
-   * Hook to get cache errors record.
+   * Cache errors record.
    */
-  useCacheErrors: () => Record<FileId, string>;
+  cacheErrors: Record<FileId, string>;
   /**
-   * Hook to get upload errors record.
+   * Upload errors record.
    */
-  useUploadErrors: () => Record<FileId, string>;
+  uploadErrors: Record<FileId, string>;
   /**
    * Function to retrieve file record/metadata for file IDs.
    */
@@ -137,13 +137,13 @@ export type FileCache = {
 export const FileCacheContext = createContext<FileCache>({
   useItem: () => [null, undefined],
   getItem: async () => null,
-  useCacheList: () => [],
-  usePendingList: () => [],
-  useErrorList: () => [],
-  useRecentList: () => [],
-  useMissingList: () => [],
-  useCacheErrors: () => ({}),
-  useUploadErrors: () => ({}),
+  cacheIds: [],
+  pendingIds: [],
+  errorIds: [],
+  recentIds: [],
+  missingIds: [],
+  cacheErrors: {},
+  uploadErrors: {},
   getFileRecord: undefined,
   getSignedUrls: undefined,
   uploadFile: async () => {},
@@ -840,67 +840,17 @@ export const FileCacheProvider = ({
 
   const getItem = cacheStorage?.getUri;
 
-  /**
-   * Hook to retrieve the list of cached file IDs.
-   */
-  const useCacheList = useCallback(
-    (): FileId[] | Loading => cacheFileIds,
-    [cacheFileIds],
-  );
-
-  /**
-   * Hook to retrieve the list of pending file IDs.
-   */
-  const usePendingList = useCallback(
-    (): FileId[] | Loading => uploadFileIds,
-    [uploadFileIds],
-  );
-
-  /**
-   * Hook to retrieve the list of error file IDs.
-   */
-  const useErrorList = useCallback(
-    (): FileId[] | Loading => uploadErrorFileIds,
-    [uploadErrorFileIds],
-  );
-
-  /**
-   * Hook to retrieve the list of recent file IDs.
-   */
-  const useRecentList = useCallback(
-    (): FileId[] | Loading => recentFileIds,
-    [recentFileIds],
-  );
-
-  /**
-   * Hook to retrieve the list of missing file IDs.
-   */
-  const useMissingList = useCallback(
-    (): FileId[] | Loading => missingFileIds,
-    [missingFileIds],
-  );
-
-  /**
-   * Hook to get cache errors.
-   */
-  const useCacheErrors = useCallback(() => cacheErrors, [cacheErrors]);
-
-  /**
-   * Hook to get upload errors.
-   */
-  const useUploadErrors = useCallback(() => uploadErrors, [uploadErrors]);
-
   const value = useMemo(
     () => ({
       useItem,
       getItem,
-      useCacheList,
-      usePendingList,
-      useErrorList,
-      useRecentList,
-      useMissingList,
-      useCacheErrors,
-      useUploadErrors,
+      cacheIds: cacheFileIds,
+      pendingIds: uploadFileIds,
+      errorIds: uploadErrorFileIds,
+      recentIds: recentFileIds,
+      missingIds: missingFileIds,
+      cacheErrors,
+      uploadErrors,
       getFileRecord,
       getSignedUrls,
       pickFileUri,
@@ -915,13 +865,13 @@ export const FileCacheProvider = ({
     [
       useItem,
       getItem,
-      useCacheList,
-      usePendingList,
-      useErrorList,
-      useRecentList,
-      useMissingList,
-      useCacheErrors,
-      useUploadErrors,
+      cacheFileIds,
+      uploadFileIds,
+      uploadErrorFileIds,
+      recentFileIds,
+      missingFileIds,
+      cacheErrors,
+      uploadErrors,
       getFileRecord,
       getSignedUrls,
       pickFileUri,
@@ -947,9 +897,7 @@ export const FileCacheProvider = ({
  *
  * @returns The file cache API.
  */
-export const useFileCache = (): FileCache => {
-  return useContext(FileCacheContext);
-};
+export const useFileCache = (): FileCache => useContext(FileCacheContext);
 
 /**
  * Hook to access a file’s DataUri.
@@ -959,116 +907,26 @@ export const useFileCache = (): FileCache => {
  */
 export const useFileUri = (
   fileId?: FileId,
-): AsyncState<DataUri | null | undefined> | Disabled => {
-  const { useItem } = useFileCache();
-  return useItem(fileId);
-};
-
-/**
- * Hook to access the pending file IDs.
- *
- * @returns Array of pending file IDs.
- */
-export const usePendingFileIds = (): FileId[] | Loading =>
-  useContext(FileCacheContext).usePendingList();
-
-/**
- * Hook to access the error file IDs.
- *
- * @returns Array of error file IDs.
- */
-export const useErrorFileIds = (): FileId[] | Loading =>
-  useContext(FileCacheContext).useErrorList();
-
-/**
- * Hook to access the cached file IDs.
- *
- * @returns Array of cached file IDs.
- */
-export const useCacheFileIds = (): FileId[] | Loading =>
-  useFileCache().useCacheList();
-
-/**
- * Hook to access the recent file IDs.
- *
- * @returns Array of recent file IDs.
- */
-export const useRecentFileIds = (): FileId[] | Loading =>
-  useFileCache().useRecentList();
-
-/**
- * Hook to access the missing file IDs.
- *
- * @returns Array of missing file IDs.
- */
-export const useMissingFileIds = (): FileId[] | Loading =>
-  useFileCache().useMissingList();
-
-/**
- * Hook to access cache errors.
- *
- * @returns The cache errors record.
- */
-export const useCacheErrorsRecord = (): Record<FileId, string> =>
-  useFileCache().useCacheErrors();
-
-/**
- * Hook to access upload errors.
- *
- * @returns The upload errors record.
- */
-export const useUploadErrorsRecord = (): Record<FileId, string> =>
-  useFileCache().useUploadErrors();
-
-export const useGetFileRecord = () => useFileCache().getFileRecord;
-export const useGetSignedUrls = () => useFileCache().getSignedUrls;
+): AsyncState<DataUri | null | undefined> | Disabled =>
+  useFileCache().useItem(fileId);
 
 /**
  * Hook to trigger file cache synchronization.
  *
  * @returns The sync function.
  */
-export const useFileCacheSync = () => {
-  const { sync } = useFileCache();
-  return sync;
-};
+export const useFileCacheSync = () => useFileCache().sync;
 
 /**
  * Hook to trigger file cache reset.
  *
  * @returns The reset function.
  */
-export const useFileCacheReset = () => {
-  const { reset } = useFileCache();
-  return reset;
-};
+export const useFileCacheReset = () => useFileCache().reset;
 
 /**
  * Hook to trigger file cache refresh of non-pending files.
  *
  * @returns The refreshNonPending function.
  */
-export const useFileCacheClear = () => {
-  const { refreshNonPending } = useFileCache();
-  return refreshNonPending;
-};
-
-/**
- * Hook to clear a cache error.
- *
- * @returns The clearCacheError function.
- */
-export const useClearCacheError = () => {
-  const { clearCacheError } = useFileCache();
-  return clearCacheError;
-};
-
-/**
- * Hook to clear an upload error.
- *
- * @returns The clearUploadError function.
- */
-export const useClearUploadError = () => {
-  const { clearUploadError } = useFileCache();
-  return clearUploadError;
-};
+export const useFileCacheClear = () => useFileCache().refreshNonPending;
