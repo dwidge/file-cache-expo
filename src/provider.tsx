@@ -6,15 +6,8 @@
  * and refreshing the cache from the remote source.
  */
 
-import { ApiSetList, useLocal } from "@dwidge/crud-api-react";
-import {
-  AsyncDispatch,
-  AsyncState,
-  getActionValue,
-  Json,
-  useConvert,
-  useJson,
-} from "@dwidge/hooks-react";
+import { ApiSetList } from "@dwidge/crud-api-react";
+import { AsyncDispatch, AsyncState, getActionValue } from "@dwidge/hooks-react";
 import {
   createContext,
   ReactNode,
@@ -25,7 +18,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { z } from "zod";
 import { evictCacheItem } from "./evictCacheItem.js";
 import { log } from "./log.js";
 import { setCacheError } from "./setCacheError.js";
@@ -1080,32 +1072,3 @@ export const useClearUploadError = () => {
   const { clearUploadError } = useFileCache();
   return clearUploadError;
 };
-
-/**
- * Hook to retrieve the list of pending file IDs.
- * We assume that pending IDs are stored as JSON in local storage.
- */
-const usePendingIds = (): AsyncState<FileId[]> => {
-  const ids = useStringArray(
-    useJson(useLocal<string | null>("pendingFileIds", null)),
-  );
-  return ids;
-};
-
-/**
- * Hook to retrieve the list of recent file IDs.
- */
-const useRecentIds = (): AsyncState<FileId[]> => {
-  const ids = useStringArray(
-    useJson(useLocal<string | null>("recentFileIds", null)),
-  );
-  return ids;
-};
-
-/**
- * A converter hook to transform JSON into an array of strings.
- */
-const useStringArray = useConvert<Json, string[]>(
-  (v: Json) => z.string().array().nullable().parse(v) ?? [],
-  (v: string[]) => z.string().array().parse(v),
-);
