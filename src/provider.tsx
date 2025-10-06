@@ -97,15 +97,20 @@ export type FileCache = {
    */
   useUploadErrors: () => Record<FileId, string>;
   /**
-   * Function to retrieve file record/metadata for a file ID.
+   * Function to retrieve file record/metadata for file IDs.
    */
-  getFileRecord?: (id: FileId) => Promise<MetaNull | null>;
+  getFileRecord?: (ids: FileId[]) => Promise<(MetaNull | null)[]>;
   /**
-   * Function to retrieve signed URLs for a file ID.
+   * Function to retrieve signed URLs for file IDs.
    */
   getSignedUrls?: (
-    id: FileId,
-  ) => Promise<Pick<FileRecord, "getUrl" | "putUrl"> | null>;
+    ids: FileId[],
+  ) => Promise<
+    (Pick<
+      FileRecord,
+      "getUrl" | "putUrl" | "id" | "size" | "mime" | "sha256"
+    > | null)[]
+  >;
 
   pickFileUri?: () => Promise<string[]>;
 
@@ -199,15 +204,20 @@ export type FileCacheProviderProps = {
    */
   downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
   /**
-   * Function to retrieve file record/metadata for a file ID.
+   * Function to retrieve file record/metadata for file IDs.
    */
-  getFileRecord?: (id: FileId) => Promise<MetaNull | null>;
+  getFileRecord?: (ids: FileId[]) => Promise<(MetaNull | null)[]>;
   /**
-   * Function to retrieve signed URLs for a file ID.
+   * Function to retrieve signed URLs for file IDs.
    */
   getSignedUrls?: (
-    id: FileId,
-  ) => Promise<Pick<FileRecord, "getUrl" | "putUrl"> | null>;
+    ids: FileId[],
+  ) => Promise<
+    (Pick<
+      FileRecord,
+      "getUrl" | "putUrl" | "id" | "size" | "mime" | "sha256"
+    > | null)[]
+  >;
 
   pickFileUri?: () => Promise<string[]>;
 
@@ -1163,7 +1173,7 @@ export const FileCacheProvider = ({
                 const r = await setUploadUri(
                   await verifyDataUriAgainstMeta(
                     await getActionValue(data, null),
-                    await getFileRecord(fileId),
+                    (await getFileRecord([fileId]))?.[0] ?? null,
                   ),
                 );
                 clearUploadError(fileId);

@@ -303,22 +303,24 @@ const FileItem: React.FC<FileItemProps> = ({
       setLoadError(null);
       try {
         const [rec, urlObj] = await Promise.allSettled([
-          getFileRecord ? getFileRecord(fileId) : Promise.resolve(undefined),
-          getSignedUrls ? getSignedUrls(fileId) : Promise.resolve(null),
+          getFileRecord ? getFileRecord([fileId]) : Promise.resolve(undefined),
+          getSignedUrls ? getSignedUrls([fileId]) : Promise.resolve(null),
         ]);
 
         if (rec.status === "fulfilled" && rec.value) {
-          const r = rec.value;
-          setRecord(r);
-          setMeta({
-            size: r.size ?? undefined,
-            mime: r.mime ?? undefined,
-            sha256: r.sha256 ?? undefined,
-          });
+          const [r] = rec.value;
+          if (r) {
+            setRecord(r);
+            setMeta({
+              size: r.size ?? undefined,
+              mime: r.mime ?? undefined,
+              sha256: r.sha256 ?? undefined,
+            });
+          }
         }
 
         if (urlObj.status === "fulfilled") {
-          const urlValue = urlObj.value;
+          const [urlValue] = urlObj.value ?? [];
           if (urlValue) {
             setUrls({
               getUrl: urlValue.getUrl ?? null,

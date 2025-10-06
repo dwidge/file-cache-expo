@@ -125,7 +125,7 @@ export const useRemoteDataUri = (
           await setFile({ id, ...meta });
           await setCache(uri);
 
-          const urls = await getFileUrls({ id });
+          const [urls] = await getFileUrls({ id });
           if (!urls)
             throw new Error("updateRemoteDataUriE1: Failed to get file urls");
 

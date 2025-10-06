@@ -44,23 +44,45 @@ const useGetUrls = (getFiles?: ApiGetList<FileRecord>) =>
 const useGetUrlsById = (getFiles?: ApiGetList<FileRecord>) =>
   getFiles
     ? async (
-        id: FileId,
-      ): Promise<Pick<FileRecord, "putUrl" | "getUrl"> | null> => {
-        return (
-          (await getFiles({ id }, { columns: ["getUrl", "putUrl"] }))?.[0] ??
-          null
+        ids: FileId[],
+      ): Promise<
+        (Pick<
+          FileRecord,
+          "putUrl" | "getUrl" | "id" | "size" | "mime" | "sha256"
+        > | null)[]
+      > => {
+        if (ids.length === 0) {
+          return [];
+        }
+        const files = await getFiles(
+          { id: ids },
+          { columns: ["getUrl", "putUrl", "id", "size", "mime", "sha256"] },
         );
+        const filesById = new Map(files.map((f) => [f.id, f]));
+        return ids.map((id) => {
+          const file = filesById.get(id);
+          return file ?? null;
+        });
       }
     : undefined;
 
 const useGetMeta = (getFiles?: ApiGetList<FileRecord>) =>
   getFiles
-    ? async (id: string): Promise<MetaNull | null> => {
-        return (
-          (
-            await getFiles({ id }, { columns: ["mime", "size", "sha256"] })
-          )?.[0] ?? null
+    ? async (ids: string[]): Promise<(MetaNull | null)[]> => {
+        if (ids.length === 0) {
+          return [];
+        }
+        const files = await getFiles(
+          { id: ids },
+          { columns: ["id", "mime", "size", "sha256"] },
         );
+        const filesById = new Map(files.map((f) => [f.id, f]));
+        return ids.map((id) => {
+          const file = filesById.get(id);
+          return file
+            ? { mime: file.mime, size: file.size, sha256: file.sha256 }
+            : null;
+        });
       }
     : undefined;
 
