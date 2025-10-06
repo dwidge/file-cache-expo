@@ -4,6 +4,7 @@ import { setCacheError } from "./setCacheError.js";
 import { FileId } from "./types.js";
 import { getSizeFromDataUri } from "./uri.js";
 import { DownloadFileId } from "./useDownloadFileId.js";
+import { GetSignedUrlsById } from "./useGetUrlsById.js";
 import { ManagedUriStorage } from "./useLocalUri.js";
 import { UploadFileId } from "./useUploadFileId.js";
 
@@ -19,6 +20,7 @@ export const syncPendingFiles = async ({
   getUploadUri,
   uploadFile,
   downloadFile,
+  getSignedUrls,
   setCacheUri,
   deleteUploadUri,
   setUploadErrors,
@@ -29,6 +31,7 @@ export const syncPendingFiles = async ({
   getUploadUri: NonNullable<ManagedUriStorage["getUri"]>;
   uploadFile: UploadFileId;
   downloadFile: DownloadFileId;
+  getSignedUrls: GetSignedUrlsById;
   setCacheUri: NonNullable<ManagedUriStorage["setUri"]>;
   deleteUploadUri: NonNullable<ManagedUriStorage["deleteUri"]>;
   setUploadErrors: React.Dispatch<React.SetStateAction<Record<FileId, string>>>;
@@ -38,6 +41,16 @@ export const syncPendingFiles = async ({
   log("Start upload pending list...", { count: uploadFileIds.length });
 
   setUploadErrors({});
+
+  if (uploadFileIds.length === 0) {
+    log("Finish upload pending list, no files to upload.");
+    return;
+  }
+
+  const urlRecords = await getSignedUrls(uploadFileIds);
+  const urlRecordsMap = new Map(
+    urlRecords.filter((r) => r).map((r) => [r!.id, r!]),
+  );
 
   const limit = pLimit(concurrency);
   const promises = uploadFileIds.map((id) =>
@@ -51,15 +64,20 @@ export const syncPendingFiles = async ({
         if (dataUri === undefined)
           throw new Error(`Pending file not found in upload storage.`);
 
+        const record = urlRecordsMap.get(id);
+        if (!record) {
+          throw new Error(`Could not get signed URLs for file ${id}.`);
+        }
+
         log(`Start upload pending file...`, {
           id,
           size: dataUri?.length ?? null,
         });
-        await uploadFile(id, dataUri);
+        await uploadFile(record, dataUri);
         if (signal?.aborted) throw new Error("Upload aborted");
 
         log(`Confirming upload for file ${id}...`);
-        const fetchedDataUri = await downloadFile(id);
+        const fetchedDataUri = await downloadFile(record);
         if (fetchedDataUri !== dataUri)
           throw new Error(
             `Confirmation fetch failed: File not found on server after upload.`,

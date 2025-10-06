@@ -498,6 +498,7 @@ export const FileCacheDiagnostic: React.FC = () => {
     uploadErrors,
     clearCacheError,
     clearUploadError,
+    getSignedUrls,
   } = useFileCache();
 
   const handleRetryUpload = async (id: FileId, uri?: DataUri) => {
@@ -516,11 +517,16 @@ export const FileCacheDiagnostic: React.FC = () => {
     await refreshNonPending?.([id]);
   };
 
-  const handleManualUpload = async (id: FileId, dataUri: DataUri) => {
-    if (uploadFile) {
-      await uploadFile(id, dataUri);
-    }
-  };
+  const handleManualUpload =
+    uploadFile && getSignedUrls
+      ? async (id: FileId, dataUri: DataUri) => {
+          const [urls] = await getSignedUrls([id]);
+          if (!urls) {
+            throw new UserError(`Could not get signed URLs for file ${id}`);
+          }
+          await uploadFile(urls, dataUri);
+        }
+      : undefined;
 
   return (
     <View style={styles.container}>

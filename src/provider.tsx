@@ -24,22 +24,18 @@ import { setCacheError } from "./setCacheError.js";
 import { setMissingId } from "./setMissingId.js";
 import { syncLatestFiles } from "./syncLatestFiles.js";
 import { syncPendingFiles } from "./syncPendingFiles.js";
-import {
-  DataUri,
-  Deleted,
-  Disabled,
-  FileId,
-  FileRecord,
-  Loading,
-} from "./types.js";
+import { DataUri, Disabled, FileId, FileRecord, Loading } from "./types.js";
 import {
   getMimeTypeFromDataUri,
   getSha256HexFromDataUri,
   getSizeFromDataUri,
   MetaNull,
 } from "./uri.js";
+import { DownloadFileId } from "./useDownloadFileId.js";
+import { GetSignedUrlsById } from "./useGetUrlsById.js";
 import { ManagedUriStorage, useManagedUriItem } from "./useLocalUri.js";
 import { useMountTracker, useMountTrackerItem } from "./useMountTracker.js";
+import { UploadFileId, UploadFileIdPayload } from "./useUploadFileId.js";
 
 /**
  * The API exposed by the File Cache system.
@@ -103,7 +99,7 @@ export type FileCache = {
   /**
    * Function to manually upload a file by ID and data URI.
    */
-  uploadFile?: (id: FileId, data: DataUri) => Promise<void>;
+  uploadFile?: (payload: UploadFileIdPayload, data: DataUri) => Promise<void>;
   /**
    * Trigger a sync operation to upload pending files from cache and download speculative files to cache.
    * @param options - Optional parameters: an AbortSignal and a progress notifier.
@@ -182,12 +178,12 @@ export type FileCacheProviderProps = {
    * Function to upload a file.
    * Receives the file id and its DataUri (or null to indicate deletion).
    */
-  uploadFile?: (id: FileId, data: DataUri | Deleted) => Promise<void>;
+  uploadFile?: UploadFileId;
   /**
    * Function to download a file.
    * Receives the file id and should return the file’s DataUri (or null if it does not exist).
    */
-  downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
+  downloadFile?: DownloadFileId;
   /**
    * Function to retrieve file record/metadata for file IDs.
    */
@@ -317,6 +313,7 @@ const useLiveCacheManager = ({
   cacheFileIds,
   uploadFileIds,
   downloadFile,
+  getSignedUrls,
   setUri,
   maxMounted,
   setCacheErrors,
@@ -326,7 +323,8 @@ const useLiveCacheManager = ({
   mountedFileIds: FileId[];
   cacheFileIds: FileId[] | Loading;
   uploadFileIds: FileId[] | Loading;
-  downloadFile?: (id: FileId) => Promise<DataUri | Deleted | undefined>;
+  downloadFile?: DownloadFileId;
+  getSignedUrls?: GetSignedUrlsById;
   setUri: ManagedUriStorage["setUri"] | Disabled;
   maxMounted?: number;
   setCacheErrors: React.Dispatch<React.SetStateAction<Record<FileId, string>>>;
@@ -360,6 +358,7 @@ const useLiveCacheManager = ({
       !Array.isArray(filteredFetchIds) ||
       !setUri ||
       !downloadFile ||
+      !getSignedUrls ||
       filteredFetchIds.length === 0
     )
       return;
@@ -368,10 +367,26 @@ const useLiveCacheManager = ({
       if (isFetchingRef.current) return;
       isFetchingRef.current = true;
 
+      const urlRecords = await getSignedUrls(filteredFetchIds);
+      const urlRecordsMap = new Map(
+        urlRecords.filter((r) => r).map((r) => [r!.id, r!]),
+      );
+
       for (const id of filteredFetchIds) {
         log(`Cache1: Fetching mounted file ${id}...`);
         try {
-          const dataUri = await downloadFile(id);
+          const record = urlRecordsMap.get(id);
+          if (!record) {
+            log(`Cache2: No data on server for mounted file ${id}`, {
+              filteredFetchIds,
+              mountedFileIds,
+              cacheFileIds,
+              uploadFileIds,
+            });
+            setMissingFileIds(setMissingId(id, true));
+            continue;
+          }
+          const dataUri = await downloadFile(record);
           if (dataUri === undefined) {
             log(`Cache2: No data on server for mounted file ${id}`, {
               filteredFetchIds,
@@ -412,6 +427,7 @@ const useLiveCacheManager = ({
     isOnline,
     filteredFetchIds,
     downloadFile,
+    getSignedUrls,
     setUri,
     setCacheErrors,
     setMissingFileIds,
@@ -568,6 +584,7 @@ export const FileCacheProvider = ({
     cacheFileIds,
     uploadFileIds,
     downloadFile,
+    getSignedUrls,
     setUri: setCacheUri,
     maxMounted,
     setCacheErrors,
@@ -600,11 +617,16 @@ export const FileCacheProvider = ({
       getUploadUri &&
       uploadFile &&
       downloadFile &&
+      getSignedUrls &&
       setCacheUri &&
       deleteUploadUri;
 
     const canSyncLatest =
-      getCacheableIds && cacheFileIds && downloadFile && setCacheUri;
+      getCacheableIds &&
+      cacheFileIds &&
+      downloadFile &&
+      getSignedUrls &&
+      setCacheUri;
 
     if (!canSyncPending || !canSyncLatest) {
       return undefined;
@@ -635,6 +657,7 @@ export const FileCacheProvider = ({
         getUploadUri,
         uploadFile,
         downloadFile,
+        getSignedUrls,
         setCacheUri,
         deleteUploadUri,
         setUploadErrors,
@@ -650,6 +673,7 @@ export const FileCacheProvider = ({
           getCacheableIds,
           cacheFileIds,
           downloadFile,
+          getSignedUrls,
           setCacheUri,
           maxCache,
           mountedFileIds,
@@ -670,6 +694,7 @@ export const FileCacheProvider = ({
     getUploadUri,
     uploadFile,
     downloadFile,
+    getSignedUrls,
     setCacheUri,
     deleteUploadUri,
     setUploadErrors,
@@ -840,7 +865,7 @@ export const FileCacheProvider = ({
 
   const getItem = cacheStorage?.getUri;
 
-  const value = useMemo(
+  const value: FileCache = useMemo(
     () => ({
       useItem,
       getItem,

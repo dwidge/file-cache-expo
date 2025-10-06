@@ -10,6 +10,7 @@ import { FileCacheProvider, useFileCache, useFileUri } from "./provider";
 import { DataUri, Disabled, FileId, FileRecord } from "./types";
 import { getMetaBufferFromDataUri, MetaNull } from "./uri";
 import { useDownloadFileId } from "./useDownloadFileId";
+import { useGetUrlsById } from "./useGetUrlsById";
 import { useManagedUriStorage } from "./useLocalUri";
 import { usePlatformLocalStorage } from "./usePlatformLocalStorage";
 import { useUploadFileId } from "./useUploadFileId";
@@ -35,31 +36,6 @@ const useGetUrls = (getFiles?: ApiGetList<FileRecord>) =>
         await getFiles(filter, {
           columns: ["getUrl", "putUrl", "id", "size", "mime", "sha256"],
         })
-    : undefined;
-
-const useGetUrlsById = (getFiles?: ApiGetList<FileRecord>) =>
-  getFiles
-    ? async (
-        ids: FileId[],
-      ): Promise<
-        (Pick<
-          FileRecord,
-          "putUrl" | "getUrl" | "id" | "size" | "mime" | "sha256"
-        > | null)[]
-      > => {
-        if (ids.length === 0) {
-          return [];
-        }
-        const files = await getFiles(
-          { id: ids },
-          { columns: ["getUrl", "putUrl", "id", "size", "mime", "sha256"] },
-        );
-        const filesById = new Map(files.map((f) => [f.id, f]));
-        return ids.map((id) => {
-          const file = filesById.get(id);
-          return file ?? null;
-        });
-      }
     : undefined;
 
 const useGetMeta = (getFiles?: ApiGetList<FileRecord>) =>
@@ -136,8 +112,8 @@ export const FileCacheProvider2 = ({
       maxRecent={maxRecent}
       isOnline={isOnline}
       getCacheableIds={useGetCacheableIds(getFilesLocal)}
-      uploadFile={useUploadFileId(useGetUrls(getFiles), axios)}
-      downloadFile={useDownloadFileId(useGetUrls(getFiles), axios)}
+      uploadFile={useUploadFileId(axios)}
+      downloadFile={useDownloadFileId(axios)}
       cacheStorage={useManagedUriStorage(usePlatformLocalStorage(cachePath))}
       uploadStorage={useManagedUriStorage(
         usePlatformLocalStorage(uploadCachePath),

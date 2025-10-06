@@ -6,6 +6,7 @@ import { setCacheError } from "./setCacheError.js";
 import { setMissingId } from "./setMissingId.js";
 import { FileId } from "./types.js";
 import { DownloadFileId } from "./useDownloadFileId.js";
+import { GetSignedUrlsById } from "./useGetUrlsById.js";
 import { ManagedUriStorage } from "./useLocalUri.js";
 
 /**
@@ -20,6 +21,7 @@ export const syncLatestFiles = async ({
   getCacheableIds,
   cacheFileIds,
   downloadFile,
+  getSignedUrls,
   setCacheUri,
   maxCache,
   mountedFileIds,
@@ -32,6 +34,7 @@ export const syncLatestFiles = async ({
   getCacheableIds: (maxItemsToCache: number) => Promise<FileId[] | undefined>;
   cacheFileIds: FileId[];
   downloadFile: DownloadFileId;
+  getSignedUrls: GetSignedUrlsById;
   setCacheUri: NonNullable<ManagedUriStorage["setUri"]>;
   maxCache: number;
   mountedFileIds: FileId[];
@@ -95,8 +98,18 @@ export const syncLatestFiles = async ({
 
   log("Start fetching...", { count: finalIdsToFetch.length });
 
+  if (finalIdsToFetch.length === 0) {
+    log("Finish fetching, no new files to fetch.");
+    return;
+  }
+
   setMissingFileIds([]);
   setCacheErrors({});
+
+  const urlRecords = await getSignedUrls(finalIdsToFetch);
+  const urlRecordsMap = new Map(
+    urlRecords.filter((r) => r).map((r) => [r!.id, r!]),
+  );
 
   const limit = pLimit(concurrency);
   const promises = finalIdsToFetch.map((id) =>
@@ -105,7 +118,16 @@ export const syncLatestFiles = async ({
 
       try {
         log(`Try to fetch file ${id}...`);
-        const dataUri = await downloadFile(id);
+        const record = urlRecordsMap.get(id);
+        if (!record) {
+          log(
+            `File ${id} not found on server (no signed URL). Adding to missing.`,
+          );
+          setMissingFileIds(setMissingId(id, true));
+          return;
+        }
+
+        const dataUri = await downloadFile(record);
         if (signal?.aborted) throw new Error("Sync aborted");
 
         if (dataUri === undefined) {

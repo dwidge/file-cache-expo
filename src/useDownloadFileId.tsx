@@ -1,30 +1,30 @@
 import { AxiosInstance } from "axios";
 import { getBufferFromUrlAndVerify } from "./getBufferFromUrl.js";
-import { DataUri, Disabled, FileId, FileMeta, GetFileUrls } from "./types.js";
+import { DataUri, Disabled, FileMeta, FileRecord } from "./types.js";
 import { getDataUriFromBufferBin } from "./uri.js";
 
+export type DownloadFilePayload = Partial<
+  Pick<FileRecord, "getUrl" | "size" | "mime" | "sha256">
+>;
+
 export type DownloadFileId = (
-  id: FileId,
+  payload: DownloadFilePayload,
 ) => Promise<DataUri | null | undefined>;
 
 /**
  * Hook to get a function that downloads a file from remote storage.
  *
- * @param getUrls - A function that returns signed URLs for a file.
  * @returns A function that downloads and returns the file’s DataUri.
  */
 export const useDownloadFileId = (
-  getUrls?: GetFileUrls,
   axios?: AxiosInstance,
 ): DownloadFileId | Disabled =>
-  getUrls
-    ? async (id: FileId): Promise<DataUri | null | undefined> => {
-        const [record] = await getUrls({ id });
+  axios
+    ? async (
+        record: DownloadFilePayload,
+      ): Promise<DataUri | null | undefined> => {
         if (!record)
-          throw new Error(
-            `useDownloadFileIdE2: No record/meta found for file id ${id}`,
-            { cause: { id } },
-          );
+          throw new Error(`useDownloadFileIdE2: No record/meta found for file`);
 
         if (
           record.size === null &&
@@ -35,14 +35,13 @@ export const useDownloadFileId = (
 
         if (record.size == null || record.mime == null || record.sha256 == null)
           throw new Error(
-            `useDownloadFileIdE1: Incomplete file meta for file ${id}`,
+            `useDownloadFileIdE1: Incomplete file meta for file`,
             { cause: { fileMeta: record } },
           );
 
         if (!record.getUrl)
           throw new Error(
-            `useDownloadFileIdE3: No download URL available for file id ${id}`,
-            { cause: { id } },
+            `useDownloadFileIdE3: No download URL available for file`,
           );
 
         const meta: FileMeta = {
