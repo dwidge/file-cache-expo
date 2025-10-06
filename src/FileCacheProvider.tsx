@@ -11,12 +11,12 @@ import {
   useDownloadFileId,
   useFileCache,
   useFileUri,
-  useUploadFileId,
 } from "./provider";
 import { DataUri, Disabled, FileId, FileRecord } from "./types";
 import { getMetaBufferFromDataUri, MetaNull } from "./uri";
 import { useManagedUriStorage } from "./useLocalUri";
 import { usePlatformLocalStorage } from "./usePlatformLocalStorage";
+import { useUploadFileId } from "./useUploadFileId";
 
 /**
  * Hook to get signed URLs for a file.
