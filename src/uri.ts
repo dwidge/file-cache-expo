@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Base64, DataUri, FileUri, MIME, Sha256Hex, Uint } from "./types.js";
 
 export const isFileUri = (v: string): v is FileUri => v.startsWith("file:");
+export const isBlobUri = (v: string): v is FileUri => v.startsWith("blob:");
 export const isDataUri = (v: string): v is DataUri => v.startsWith("data:");
 
 export const asFileUri = (v: string): FileUri => (
