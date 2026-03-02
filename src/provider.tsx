@@ -48,6 +48,10 @@ export type FileCache = {
     fileId?: FileId,
   ) => AsyncState<DataUri | null | undefined> | Disabled;
   getItem: ((id: string) => Promise<DataUri | null | undefined>) | undefined;
+  setItem: ((
+    id: string,
+    data: DataUri | null,
+  ) => Promise<DataUri | null | undefined>) | undefined;
   /**
    * List of file IDs in the cache.
    */
@@ -133,6 +137,7 @@ export type FileCache = {
 export const FileCacheContext = createContext<FileCache>({
   useItem: () => [null, undefined],
   getItem: async () => null,
+  setItem: async () => null,
   cacheIds: [],
   pendingIds: [],
   errorIds: [],
@@ -758,6 +763,81 @@ export const FileCacheProvider = ({
     });
   }, []);
 
+  const verifyDataUriAgainstMeta = useCallback(
+    async (
+      dataUri: DataUri | null | undefined,
+      fileMeta: MetaNull | null,
+    ): Promise<DataUri | null | undefined> => {
+      if (dataUri) {
+        if (!fileMeta)
+          throw new Error("verifyDataUriAgainstMetaE1: Missing fileMeta");
+
+        if (fileMeta.mime !== null) {
+          const dataMime = getMimeTypeFromDataUri(dataUri);
+          if (dataMime !== fileMeta.mime) {
+            throw new Error(
+              `verifyDataUriAgainstMetaE2: MIME mismatch: expected ${fileMeta.mime}, got ${dataMime}`,
+            );
+          }
+        }
+
+        if (fileMeta.size !== null) {
+          const dataSize = getSizeFromDataUri(dataUri);
+          if (dataSize !== fileMeta.size) {
+            throw new Error(
+              `verifyDataUriAgainstMetaE3: Size mismatch: expected ${fileMeta.size}, got ${dataSize}`,
+            );
+          }
+        }
+
+        if (fileMeta.sha256 !== null) {
+          const dataSha = await getSha256HexFromDataUri(dataUri);
+          if (dataSha !== fileMeta.sha256) {
+            throw new Error(
+              `verifyDataUriAgainstMetaE4: SHA256 mismatch: expected ${fileMeta.sha256}, got ${dataSha}`,
+            );
+          }
+        }
+      }
+
+      return dataUri;
+    },
+    [],
+  );
+
+  const setItem = useMemo(
+    () =>
+      setUploadUri &&
+      getFileRecord &&
+      uploadFileIds &&
+      uploadFileIds.length < maxUploadCache
+        ? async (
+            fileId: string,
+            data: DataUri | null,
+          ): Promise<DataUri | null | undefined> => {
+            const resolvedData = await getActionValue(data, null);
+            const fileMeta = (await getFileRecord([fileId]))?.[0] ?? null;
+            const verifiedData = await verifyDataUriAgainstMeta(
+              resolvedData,
+              fileMeta,
+            );
+            const result = await setUploadUri(fileId, verifiedData);
+            clearUploadError(fileId);
+            clearCacheError(fileId);
+            return result;
+          }
+        : undefined,
+    [
+      setUploadUri,
+      getFileRecord,
+      uploadFileIds,
+      maxUploadCache,
+      verifyDataUriAgainstMeta,
+      clearUploadError,
+      clearCacheError,
+    ],
+  );
+
   /**
    * Hook to retrieve a file’s DataUri from the cache.
    *
@@ -853,14 +933,11 @@ export const FileCacheProvider = ({
         ],
       );
 
-    return [
-      uploadErrorUri !== undefined
-        ? uploadErrorUri
-        : uploadUri !== undefined
-          ? uploadUri
-          : dataUri,
-      setItem,
-    ];
+    const layers = [uploadErrorUri, uploadUri, dataUri];
+    const found = layers.find((v) => typeof v === "string");
+    const loading = layers.some((v) => v === undefined);
+
+    return [found ?? (loading ? undefined : null), setItem];
   };
 
   const getItem = cacheStorage?.getUri;
@@ -869,6 +946,7 @@ export const FileCacheProvider = ({
     () => ({
       useItem,
       getItem,
+      setItem,
       cacheIds: cacheFileIds,
       pendingIds: uploadFileIds,
       errorIds: uploadErrorFileIds,
@@ -890,6 +968,7 @@ export const FileCacheProvider = ({
     [
       useItem,
       getItem,
+      setItem,
       cacheFileIds,
       uploadFileIds,
       uploadErrorFileIds,

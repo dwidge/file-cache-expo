@@ -157,3 +157,5 @@ export const useFileCache2Uri = (
 export const usePickFileUri = () => useFileCache().pickFileUri;
 
 export const useGetFileCache2Uri = () => useFileCache().getItem;
+
+export const useSetFileCacheItem = () => useFileCache().setItem;
